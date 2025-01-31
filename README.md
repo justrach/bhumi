@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://images.bhumi.trilok.ai/bhumi_logo.png" alt="Bhumi Logo" width="200"/>
+  <img src="/assets/bhumi_logo.png" alt="Bhumi Logo" width="200"/>
 </p>
 
 <h1 align="center"><b>Bhumi (भूमि)</b></h1>
