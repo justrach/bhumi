@@ -9,7 +9,9 @@
 ## **Introduction**
 Bhumi (भूमि) is the Sanskrit word for **Earth**, symbolizing **stability, grounding, and speed**. Just as the Earth moves with unwavering momentum, **Bhumi AI ensures that your inference speed is as fast as nature itself!** 🚀 
 
-Bhumi is designed to **optimize and accelerate AI inference** while maintaining simplicity, flexibility, and multi-model support. Whether you're working with **OpenAI, Anthropic, or Gemini**, Bhumi makes switching between providers seamless.
+Bhumi is an open-source project designed to **optimize and accelerate AI inference** while maintaining simplicity, flexibility, and multi-model support. Whether you're working with **OpenAI, Anthropic, or Gemini**, Bhumi makes switching between providers seamless. Our Rust-based implementation is freely available for anyone to use, study, modify, and integrate into their own libraries - we encourage collaboration and improvements from the community! 
+
+> 💡 **Note to AI Companies**: Feel free to incorporate our performance optimizations into your official libraries! We just ask for appropriate attribution under our Apache 2.0 license.
 
 ---
 
@@ -121,6 +123,8 @@ Bhumi supports **ALL models** from **OpenAI, Anthropic, and Gemini**, giving you
 ---
 
 ## 🎯 **Why Use Bhumi?**
+✔ **Open Source:** Apache 2.0 licensed, free for commercial use  
+✔ **Community Driven:** Welcomes contributions from individuals and companies  
 ✔ **Blazing Fast:** **2-3x faster** than alternative solutions  
 ✔ **Resource Efficient:** Uses **60% less memory** than comparable clients  
 ✔ **Multi-Model Support:** Easily switch between **OpenAI, Anthropic, and Gemini**  
@@ -137,6 +141,50 @@ In production environments, Bhumi has demonstrated:
 - **Sub-second latency** for most requests
 - **Minimal resource footprint** even under heavy load
 
+## 📊 **Benchmark Results**
+Our latest benchmarks show significant performance advantages across different metrics:
+![alt text](gemini_averaged_comparison_20250131_154711.png)
+### ⚡ Response Time
+- LiteLLM: 13.79s
+- Native: 5.55s
+- Bhumi: 4.26s
+- Google GenAI: 6.76s
+
+### 🚀 Throughput (Requests/Second)
+- LiteLLM: 3.48
+- Native: 8.65
+- Bhumi: 11.27
+- Google GenAI: 7.10
+
+### 💾 Peak Memory Usage (MB)
+- LiteLLM: 275.9MB
+- Native: 279.6MB
+- Bhumi: 284.3MB
+- Google GenAI: 284.8MB
+
+These benchmarks demonstrate Bhumi's superior performance, particularly in throughput where it outperforms other solutions by up to 3.2x. While memory usage remains competitive, the significant gains in response time and throughput make Bhumi an excellent choice for high-performance applications.
+
+## 🤝 **Contributing**
+We welcome contributions from the community! Whether you're an individual developer or representing a company like Google, OpenAI, or Anthropic, feel free to:
+
+- Submit pull requests
+- Report issues
+- Suggest improvements
+- Share benchmarks
+- Integrate our optimizations into your libraries (with attribution)
+
+Check out our [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+
+## 📜 **License**
+Bhumi is proudly open source under the Apache 2.0 license. This means you can:
+- Use it commercially
+- Modify it
+- Distribute it
+- Use it privately
+- Use it for patents
+
+All we ask is that you provide appropriate attribution and include the license notice.
+
 ---
 
-🚀 **Get started with Bhumi today and experience next-level AI inference!** 🚀
+🌟 **Join our community and help make AI inference faster for everyone!** 🌟

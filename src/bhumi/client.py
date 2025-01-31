@@ -14,18 +14,27 @@ class CompletionResponse:
     
     @classmethod
     def from_raw_response(cls, response: str, provider: str = "gemini") -> 'CompletionResponse':
-        response_json = json.loads(response)
-        
-        if provider == "gemini":
-            text = response_json["candidates"][0]["content"]["parts"][0]["text"]
-        elif provider == "openai":
-            text = response_json["choices"][0]["message"]["content"]
-        elif provider == "anthropic":
-            text = response_json["content"][0]["text"]
-        else:
-            raise ValueError(f"Unknown provider: {provider}")
+        try:
+            response_json = json.loads(response)
             
-        return cls(text=text, raw_response=response_json)
+            if provider == "gemini":
+                text = response_json["candidates"][0]["content"]["parts"][0]["text"]
+            elif provider == "openai":
+                # Try to parse as OpenAI response first
+                if "choices" in response_json:
+                    text = response_json["choices"][0]["message"]["content"]
+                else:
+                    # If not a proper OpenAI response, use the raw text
+                    text = response
+            elif provider == "anthropic":
+                text = response_json["content"][0]["text"]
+            else:
+                raise ValueError(f"Unknown provider: {provider}")
+                
+            return cls(text=text, raw_response=response_json)
+        except json.JSONDecodeError:
+            # If we can't parse as JSON, assume it's raw text
+            return cls(text=response, raw_response={"text": response})
 
 class AsyncLLMClient:
     def __init__(
@@ -45,6 +54,7 @@ class AsyncLLMClient:
         self.model = model
         self._response_queue = asyncio.Queue()
         self._response_task = None
+        self.debug = debug  # Add debug flag
 
     async def _get_responses(self):
         """Background task to get responses from Rust"""
@@ -70,17 +80,24 @@ class AsyncLLMClient:
         
         request = {
             "_headers": {
-                "Authorization": api_key
+                "Authorization": api_key  # No Bearer prefix - Rust code adds it
             },
+            "model": model_name,
             "messages": messages,
-            "model": model_name
+            "stream": False
         }
         
-        # Submit request
+        if self.debug:
+            print("DEBUG: Sending request:", json.dumps(request, indent=2))
+            
         self._client._submit(json.dumps(request))
         
         # Wait for response
         response = await self._response_queue.get()
+        
+        if self.debug:
+            print("DEBUG: Got response:", response)
+            
         return CompletionResponse.from_raw_response(response, provider=provider)
 
 # Provider-specific clients
@@ -116,7 +133,7 @@ class OpenAIClient(AsyncLLMClient):
     def __init__(
         self,
         max_concurrent: int = 30,
-        model: str = "gpt-4",
+        model: str = "gpt-4o",
         debug: bool = False
     ):
         super().__init__(
@@ -125,41 +142,3 @@ class OpenAIClient(AsyncLLMClient):
             model=model,
             debug=debug
         )
-
-    def completion(
-        self,
-        model: str,
-        messages: List[Dict[str, str]],
-        api_key: str,
-        **kwargs
-    ) -> CompletionResponse:
-        """
-        OpenAI-specific completion call
-        """
-        provider, model_name = model.split('/', 1) if '/' in model else (self.provider, model)
-        
-        # Format request to match OpenAIRequest struct
-        request = {
-            "_headers": {
-                "Authorization": api_key
-            },
-            "model": model_name,
-            "messages": [
-                {
-                    "role": msg["role"],
-                    "content": msg["content"],
-                }
-                for msg in messages
-            ],
-            "stream": False
-        }
-        
-        self._client._submit(json.dumps(request))
-        
-        while True:
-            if response := self._client._get_response():
-                # The response is just the text string
-                return CompletionResponse(
-                    text=response,
-                    raw_response={"text": response}  # Wrap in simple dict for consistency
-                )
