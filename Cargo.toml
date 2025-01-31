@@ -1,0 +1,19 @@
+[package]
+name = "bhumi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bhumi"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
+futures = "0.3"
+futures-util = "0.3"
+bytes = "1.0"
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4"] }
+serde = { version = "1.0", features = ["derive"] }
