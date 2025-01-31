@@ -32,8 +32,9 @@ export default function Home() {
             भूमि
           </div>
           <p className="text-2xl text-gray-600 mb-8 leading-relaxed">
-            The <span className="font-semibold">fastest</span> and most <span className="font-semibold">efficient</span> AI inference client. 
-            Supporting OpenAI, Anthropic, and Gemini. A Pure <span style={{ color: "hsl(15, 85%, 70%)" }}>Rust</span> implementation.
+            The <span className="font-semibold">fastest</span> and most <span className="font-semibold">efficient</span> AI inference client
+            for Python. Built with <span style={{ color: "hsl(15, 85%, 70%)" }}>Rust</span> for unmatched performance, 
+            outperforming pure Python implementations through native multiprocessing. Supporting OpenAI, Anthropic, and Gemini.
           </p>
           <div className="flex gap-4 justify-center mb-16">
             <Button size="lg" className="bg-[hsl(15,85%,70%)] hover:bg-[hsl(15,85%,65%)] text-white font-semibold shadow-md">
