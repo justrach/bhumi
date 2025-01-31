@@ -22,7 +22,7 @@ struct LLMResponse {
 }
 
 #[pyclass]
-struct Bhumi {
+struct BhumiCore {
     sender: Arc<tokio::sync::Mutex<mpsc::Sender<String>>>,
     response_receiver: Arc<tokio::sync::Mutex<mpsc::Receiver<String>>>,
     runtime: Arc<tokio::runtime::Runtime>,
@@ -38,7 +38,7 @@ struct Bhumi {
 }
 
 #[pymethods]
-impl Bhumi {
+impl BhumiCore {
     #[new]
     #[pyo3(signature = (max_concurrent, provider="anthropic", model="claude-3-sonnet-20240229", use_grounding=false, debug=false, stream_buffer_size=1000))]
     fn new(max_concurrent: usize, provider: &str, model: &str, use_grounding: bool, debug: bool, stream_buffer_size: usize) -> PyResult<Self> {
@@ -351,7 +351,7 @@ impl Bhumi {
             });
         }
 
-        Ok(Bhumi {
+        Ok(BhumiCore {
             sender,
             response_receiver,
             runtime: runtime_clone,
@@ -486,6 +486,6 @@ impl LLMResponse {
 #[pymodule]
 fn bhumi(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<LLMResponse>()?;
-    m.add_class::<Bhumi>()?;
+    m.add_class::<BhumiCore>()?;
     Ok(())
 } 
