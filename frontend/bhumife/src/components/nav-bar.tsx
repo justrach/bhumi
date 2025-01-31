@@ -7,7 +7,7 @@ export function NavBar() {
   return (
     <nav className="flex justify-between items-center mb-16">
       <div className="flex items-center gap-2">
-        {/* <img 
+        {/* <Image 
           src="https://images.bhumi.trilok.ai/bhumi_logo.png" 
           alt="Bhumi Logo" 
           className="w-10 h-10"

@@ -3,7 +3,7 @@ import { NavBar } from "@/components/nav-bar"
 import { PerformanceChart } from "@/components/performance-chart"
 import { Button } from "@/components/ui/button"
 import { Zap, Brain } from "lucide-react"
-
+import Image from "next/image"
 export default function Home() {
   return (
     <div className="min-h-screen bg-white">
@@ -11,7 +11,7 @@ export default function Home() {
         <NavBar />
 
         <div className="text-center max-w-4xl mx-auto">
-          <img 
+          <Image 
             src="https://images.bhumi.trilok.ai/bhumi_logo.png" 
             alt="Bhumi Logo" 
             className="mx-auto mb-8 w-48 h-48 rounded-xl"
