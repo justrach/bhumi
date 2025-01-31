@@ -216,14 +216,20 @@ impl BhumiCore {
                                             println!("Worker {}: Sending request to API", worker_id);
                                         }
 
-                                        client.post("https://api.openai.com/v1/chat/completions")
+                                        let response = client.post("https://api.openai.com/v1/chat/completions")
                                             .header("Authorization", format!("Bearer {}", api_key))
                                             .header("Content-Type", "application/json")
                                             .header("Accept", "application/json")
                                             .header("Connection", "keep-alive")
                                             .json(&openai_request)
                                             .send()
-                                            .await
+                                            .await;
+
+                                        if debug {
+                                            println!("Worker {}: Got API response: {:?}", worker_id, response.is_ok());
+                                        }
+
+                                        response
                                     },
                                     "groq" => {
                                         let mut request_body = request_json.clone();
