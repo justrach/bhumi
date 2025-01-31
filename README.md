@@ -19,6 +19,11 @@ Bhumi is an open-source project designed to **optimize and accelerate AI inferen
 To install Bhumi, run the following commands:
 
 ```bash
+pip install bhumi
+```
+
+
+```bash
 rm -rf target/wheels/*
 pip uninstall bhumi
 maturin develop
