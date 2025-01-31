@@ -137,6 +137,29 @@ In production environments, Bhumi has demonstrated:
 - **Sub-second latency** for most requests
 - **Minimal resource footprint** even under heavy load
 
+## 📊 **Benchmark Results**
+Our latest benchmarks show significant performance advantages across different metrics:
+![alt text](gemini_averaged_comparison_20250131_154711.png)
+### ⚡ Response Time
+- LiteLLM: 13.79s
+- Native: 5.55s
+- Bhumi: 4.26s
+- Google GenAI: 6.76s
+
+### 🚀 Throughput (Requests/Second)
+- LiteLLM: 3.48
+- Native: 8.65
+- Bhumi: 11.27
+- Google GenAI: 7.10
+
+### 💾 Peak Memory Usage (MB)
+- LiteLLM: 275.9MB
+- Native: 279.6MB
+- Bhumi: 284.3MB
+- Google GenAI: 284.8MB
+
+These benchmarks demonstrate Bhumi's superior performance, particularly in throughput where it outperforms other solutions by up to 3.2x. While memory usage remains competitive, the significant gains in response time and throughput make Bhumi an excellent choice for high-performance applications.
+
 ---
 
 🚀 **Get started with Bhumi today and experience next-level AI inference!** 🚀
