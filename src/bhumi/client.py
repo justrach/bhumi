@@ -18,23 +18,29 @@ class CompletionResponse:
         try:
             response_json = json.loads(response)
             
+            # Fast path: if text is directly available, use it
+            if isinstance(response_json, str):
+                return cls(text=response_json, raw_response={"text": response_json})
+                
+            # Provider-specific parsing
+            text = None
             if provider == "gemini":
-                text = response_json["candidates"][0]["content"]["parts"][0]["text"]
+                if "candidates" in response_json:
+                    text = response_json["candidates"][0]["content"]["parts"][0]["text"]
             elif provider == "openai":
-                # Try to parse as OpenAI response first
                 if "choices" in response_json:
                     text = response_json["choices"][0]["message"]["content"]
-                else:
-                    # If not a proper OpenAI response, use the raw text
-                    text = response
             elif provider == "anthropic":
-                text = response_json["content"][0]["text"]
-            else:
-                raise ValueError(f"Unknown provider: {provider}")
+                if "content" in response_json:
+                    text = response_json["content"][0]["text"]
+            
+            # Fallback: use the entire response as text if we couldn't parse it
+            if text is None:
+                text = response
                 
             return cls(text=text, raw_response=response_json)
         except json.JSONDecodeError:
-            # If we can't parse as JSON, assume it's raw text
+            # If we can't parse as JSON, use raw text
             return cls(text=response, raw_response={"text": response})
 
 class AsyncLLMClient:

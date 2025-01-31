@@ -304,31 +304,9 @@ impl BhumiCore {
                                                 buffer.extend_from_slice(&bytes);
                                                 
                                                 if let Ok(text) = String::from_utf8(buffer.clone()) {
-                                                    if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
-                                                        match provider.as_str() {
-                                                            "gemini" => {
-                                                                if let Some(_content) = parsed.get("candidates") {
-                                                                    response_tx.try_send(text).ok();
-                                                                    break;
-                                                                }
-                                                            },
-                                                            "openai" => {
-                                                                if let Some(choices) = parsed.get("choices") {
-                                                                    if let Some(first) = choices.as_array().and_then(|c| c.first()) {
-                                                                        if let Some(message) = first.get("message") {
-                                                                            if let Some(content) = message.get("content") {
-                                                                                response_tx.try_send(content.to_string()).ok();
-                                                                                break;
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            },
-                                                            _ => {
-                                                                response_tx.try_send(text).ok();
-                                                                break;
-                                                            }
-                                                        }
+                                                    if serde_json::from_str::<Value>(&text).is_ok() {
+                                                        response_tx.try_send(text).ok();
+                                                        break;
                                                     }
                                                 }
                                             }
