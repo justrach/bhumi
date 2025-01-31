@@ -3,6 +3,7 @@ import sys
 from typing import List, Dict, Optional, Union
 from dataclasses import dataclass
 import asyncio
+import time
 
 # Get the root module (the Rust implementation)
 import bhumi.bhumi as _rust
@@ -136,9 +137,51 @@ class OpenAIClient(AsyncLLMClient):
         model: str = "gpt-4o",
         debug: bool = False
     ):
-        super().__init__(
+        self._client = _rust.BhumiCore(
             max_concurrent=max_concurrent,
             provider="openai",
             model=model,
             debug=debug
         )
+        self.debug = debug
+
+    async def acompletion(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        api_key: str,
+        **kwargs
+    ) -> CompletionResponse:
+        """Async OpenAI completion call"""
+        # Prepare request
+        request = {
+            "_headers": {
+                "Authorization": api_key
+            },
+            "model": model.split('/', 1)[1] if '/' in model else model,
+            "messages": messages,
+            "stream": False
+        }
+        
+        if self.debug:
+            print(f"Request payload: {json.dumps(request, indent=2)}")
+        
+        # Submit request
+        self._client._submit(json.dumps(request))
+        
+        # Wait for response with timeout
+        start_time = time.time()
+        while True:
+            if response := self._client._get_response():
+                if self.debug:
+                    print("\nReceived response:")
+                    print("=" * 40)
+                    print(response)
+                    print("=" * 40)
+                return CompletionResponse(
+                    text=response,
+                    raw_response={"text": response}
+                )
+            elif time.time() - start_time > 30:  # 30 second timeout
+                raise TimeoutError("Request timed out")
+            await asyncio.sleep(0.1)  # Use asyncio.sleep for async waiting
