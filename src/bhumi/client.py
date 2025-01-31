@@ -4,43 +4,42 @@ from typing import List, Dict, Optional, Union
 from dataclasses import dataclass
 import asyncio
 import time
+from pydantic import BaseModel
+
+from .models.openai import OpenAIResponse, OpenAIRequest, Message
 
 # Get the root module (the Rust implementation)
 import bhumi.bhumi as _rust
 
-@dataclass
-class CompletionResponse:
+class CompletionResponse(BaseModel):
     text: str
-    raw_response: dict
+    raw_response: Dict
     
     @classmethod
     def from_raw_response(cls, response: str, provider: str = "gemini") -> 'CompletionResponse':
         try:
             response_json = json.loads(response)
             
-            # Fast path: if text is directly available, use it
             if isinstance(response_json, str):
                 return cls(text=response_json, raw_response={"text": response_json})
-                
-            # Provider-specific parsing
+            
+            # Provider-specific parsing with Pydantic
             text = None
-            if provider == "gemini":
+            if provider == "openai":
+                parsed_response = OpenAIResponse.model_validate(response_json)
+                text = parsed_response.text
+            elif provider == "gemini":
                 if "candidates" in response_json:
                     text = response_json["candidates"][0]["content"]["parts"][0]["text"]
-            elif provider == "openai":
-                if "choices" in response_json:
-                    text = response_json["choices"][0]["message"]["content"]
             elif provider == "anthropic":
                 if "content" in response_json:
                     text = response_json["content"][0]["text"]
             
-            # Fallback: use the entire response as text if we couldn't parse it
             if text is None:
                 text = response
                 
             return cls(text=text, raw_response=response_json)
         except json.JSONDecodeError:
-            # If we can't parse as JSON, use raw text
             return cls(text=response, raw_response={"text": response})
 
 class AsyncLLMClient:
@@ -140,16 +139,15 @@ class OpenAIClient(AsyncLLMClient):
     def __init__(
         self,
         max_concurrent: int = 30,
-        model: str = "gpt-4o",
+        model: str = "gpt-4",
         debug: bool = False
     ):
-        self._client = _rust.BhumiCore(
+        super().__init__(
             max_concurrent=max_concurrent,
             provider="openai",
             model=model,
             debug=debug
         )
-        self.debug = debug
 
     async def acompletion(
         self,
@@ -157,37 +155,38 @@ class OpenAIClient(AsyncLLMClient):
         messages: List[Dict[str, str]],
         api_key: str,
         **kwargs
-    ) -> CompletionResponse:
-        """Async OpenAI completion call"""
-        # Prepare request
-        request = {
-            "_headers": {
-                "Authorization": api_key
-            },
-            "model": model.split('/', 1)[1] if '/' in model else model,
-            "messages": messages,
-            "stream": False
-        }
+    ) -> OpenAIResponse:
+        """Async OpenAI completion call with Pydantic models"""
+        # Convert messages to Pydantic models
+        pydantic_messages = [Message(**msg) for msg in messages]
+        
+        # Create request using Pydantic model
+        request = OpenAIRequest(
+            model=model.split('/', 1)[1] if '/' in model else model,
+            messages=pydantic_messages,
+            stream=False,
+            **kwargs
+        )
+        
+        # Convert to dict for JSON serialization
+        request_dict = request.model_dump(exclude_none=True)
+        request_dict["_headers"] = {"Authorization": api_key}
         
         if self.debug:
-            print(f"Request payload: {json.dumps(request, indent=2)}")
+            print(f"Request payload: {json.dumps(request_dict, indent=2)}")
         
-        # Submit request
-        self._client._submit(json.dumps(request))
+        self._client._submit(json.dumps(request_dict))
         
-        # Wait for response with timeout
         start_time = time.time()
         while True:
             if response := self._client._get_response():
                 if self.debug:
-                    print("\nReceived response:")
-                    print("=" * 40)
-                    print(response)
-                    print("=" * 40)
-                return CompletionResponse(
-                    text=response,
-                    raw_response={"text": response}
-                )
-            elif time.time() - start_time > 30:  # 30 second timeout
+                    print(f"\nReceived response:\n{'=' * 40}\n{response}\n{'=' * 40}")
+                
+                # Parse response using Pydantic model
+                response_data = json.loads(response)
+                return OpenAIResponse.model_validate(response_data)
+                
+            elif time.time() - start_time > 30:
                 raise TimeoutError("Request timed out")
-            await asyncio.sleep(0.1)  # Use asyncio.sleep for async waiting
+            await asyncio.sleep(0.1)
