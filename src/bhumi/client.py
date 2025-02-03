@@ -1,45 +1,47 @@
 import json
 import sys
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, AsyncIterator
 from dataclasses import dataclass
 import asyncio
 import time
-from pydantic import BaseModel
-
-from .models.openai import OpenAIResponse, OpenAIRequest, Message
 
 # Get the root module (the Rust implementation)
 import bhumi.bhumi as _rust
+from .models.openai import OpenAIResponse, Message, Choice, Usage, TokenDetails, CompletionTokenDetails, OpenAIStreamChunk
 
-class CompletionResponse(BaseModel):
+@dataclass
+class CompletionResponse:
     text: str
-    raw_response: Dict
+    raw_response: dict
     
     @classmethod
     def from_raw_response(cls, response: str, provider: str = "gemini") -> 'CompletionResponse':
         try:
             response_json = json.loads(response)
             
+            # Fast path: if text is directly available, use it
             if isinstance(response_json, str):
                 return cls(text=response_json, raw_response={"text": response_json})
-            
-            # Provider-specific parsing with Pydantic
+                
+            # Provider-specific parsing
             text = None
-            if provider == "openai":
-                parsed_response = OpenAIResponse.model_validate(response_json)
-                text = parsed_response.text
-            elif provider == "gemini":
+            if provider == "gemini":
                 if "candidates" in response_json:
                     text = response_json["candidates"][0]["content"]["parts"][0]["text"]
+            elif provider == "openai":
+                if "choices" in response_json:
+                    text = response_json["choices"][0]["message"]["content"]
             elif provider == "anthropic":
                 if "content" in response_json:
                     text = response_json["content"][0]["text"]
             
+            # Fallback: use the entire response as text if we couldn't parse it
             if text is None:
                 text = response
                 
             return cls(text=text, raw_response=response_json)
         except json.JSONDecodeError:
+            # If we can't parse as JSON, use raw text
             return cls(text=response, raw_response={"text": response})
 
 class AsyncLLMClient:
@@ -106,6 +108,41 @@ class AsyncLLMClient:
             
         return CompletionResponse.from_raw_response(response, provider=provider)
 
+    async def astream_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        api_key: str,
+        **kwargs
+    ) -> AsyncIterator[str]:
+        """Async streaming completion call"""
+        request = {
+            "_headers": {
+                "Authorization": api_key
+            },
+            "model": model.split('/', 1)[1] if '/' in model else model,
+            "messages": messages,
+            "stream": True
+        }
+        
+        self._client._submit(json.dumps(request))
+        
+        # Wait for streaming responses
+        start_time = time.time()
+        
+        while True:
+            chunk = self._client._get_stream_chunk()
+            if chunk == "[DONE]":
+                break
+            
+            if chunk:
+                yield chunk
+            
+            if time.time() - start_time > 30:
+                raise TimeoutError("Stream timeout")
+            
+            await asyncio.sleep(0.01)  # Reduced sleep time
+
 # Provider-specific clients
 class GeminiClient(AsyncLLMClient):
     def __init__(
@@ -155,38 +192,75 @@ class OpenAIClient(AsyncLLMClient):
         messages: List[Dict[str, str]],
         api_key: str,
         **kwargs
-    ) -> OpenAIResponse:
-        """Async OpenAI completion call with Pydantic models"""
-        # Convert messages to Pydantic models
-        pydantic_messages = [Message(**msg) for msg in messages]
+    ) -> CompletionResponse:
+        """Async OpenAI completion call"""
+        request = {
+            "_headers": {
+                "Authorization": api_key
+            },
+            "model": model.split('/', 1)[1] if '/' in model else model,
+            "messages": messages,
+            "stream": False
+        }
         
-        # Create request using Pydantic model
-        request = OpenAIRequest(
-            model=model.split('/', 1)[1] if '/' in model else model,
-            messages=pydantic_messages,
-            stream=False,
-            **kwargs
-        )
+        self._client._submit(json.dumps(request))
         
-        # Convert to dict for JSON serialization
-        request_dict = request.model_dump(exclude_none=True)
-        request_dict["_headers"] = {"Authorization": api_key}
-        
-        if self.debug:
-            print(f"Request payload: {json.dumps(request_dict, indent=2)}")
-        
-        self._client._submit(json.dumps(request_dict))
-        
+        # Wait for response with timeout
         start_time = time.time()
         while True:
-            if response := self._client._get_response():
-                if self.debug:
-                    print(f"\nReceived response:\n{'=' * 40}\n{response}\n{'=' * 40}")
-                
-                # Parse response using Pydantic model
-                response_data = json.loads(response)
-                return OpenAIResponse.model_validate(response_data)
-                
-            elif time.time() - start_time > 30:
+            response = self._client._get_response()
+            if response:
+                try:
+                    response_data = json.loads(response)
+                    # Skip validation for now and directly create object
+                    response_obj = OpenAIResponse(
+                        id=response_data["id"],
+                        object=response_data["object"],
+                        created=response_data["created"],
+                        model=response_data["model"],
+                        choices=[
+                            Choice(
+                                index=c["index"],
+                                message=Message(
+                                    role=c["message"]["role"],
+                                    content=c["message"]["content"],
+                                    refusal=c["message"].get("refusal")
+                                ),
+                                logprobs=c.get("logprobs"),
+                                finish_reason=c["finish_reason"]
+                            ) for c in response_data["choices"]
+                        ],
+                        usage=Usage(
+                            prompt_tokens=response_data["usage"]["prompt_tokens"],
+                            completion_tokens=response_data["usage"]["completion_tokens"],
+                            total_tokens=response_data["usage"]["total_tokens"],
+                            prompt_tokens_details=TokenDetails(
+                                cached_tokens=response_data["usage"]["prompt_tokens_details"]["cached_tokens"],
+                                audio_tokens=response_data["usage"]["prompt_tokens_details"]["audio_tokens"]
+                            ),
+                            completion_tokens_details=CompletionTokenDetails(
+                                reasoning_tokens=response_data["usage"]["completion_tokens_details"]["reasoning_tokens"],
+                                audio_tokens=response_data["usage"]["completion_tokens_details"]["audio_tokens"],
+                                accepted_prediction_tokens=response_data["usage"]["completion_tokens_details"]["accepted_prediction_tokens"],
+                                rejected_prediction_tokens=response_data["usage"]["completion_tokens_details"]["rejected_prediction_tokens"]
+                            )
+                        ),
+                        service_tier=response_data["service_tier"],
+                        system_fingerprint=response_data.get("system_fingerprint")
+                    )
+                    return CompletionResponse(
+                        text=response_obj.choices[0].message.content,
+                        raw_response=response_data
+                    )
+                except Exception as e:
+                    if self.debug:
+                        print(f"Error parsing response: {e}")
+                    return CompletionResponse(
+                        text=response,
+                        raw_response={"text": response}
+                    )
+            
+            if time.time() - start_time > 30:
                 raise TimeoutError("Request timed out")
+            
             await asyncio.sleep(0.1)

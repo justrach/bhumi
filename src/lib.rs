@@ -4,6 +4,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use serde_json::Value;
 use futures_util::StreamExt;
+use std::collections::VecDeque;
+use std::sync::Mutex;
 
 mod anthropic;
 mod gemini;
@@ -35,6 +37,7 @@ struct BhumiCore {
     model: String,
     use_grounding: bool,
     provider: String,  // "anthropic", "gemini", "openai", "groq", or "sambanova"
+    stream_chunks: Arc<Mutex<VecDeque<String>>>,
 }
 
 #[pymethods]
@@ -73,6 +76,8 @@ impl BhumiCore {
             .unwrap();
         let client = Arc::new(client);
 
+        let stream_chunks = Arc::new(Mutex::new(VecDeque::new()));
+
         // Spawn workers
         for worker_id in 0..max_concurrent {
             let request_rx = request_rx.clone();
@@ -83,6 +88,7 @@ impl BhumiCore {
             let provider = provider.clone();
             let model = model.to_string();
             let use_grounding = use_grounding;
+            let stream_chunks = stream_chunks.clone();
             
             runtime.spawn(async move {
                 if debug {
@@ -186,50 +192,30 @@ impl BhumiCore {
                                         response
                                     },
                                     "openai" => {
+                                        let mut request_body = request_json.clone();
+                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+
                                         if debug {
                                             println!("Worker {}: Processing OpenAI request", worker_id);
                                         }
 
-                                        let prompt = request_json
-                                            .get("messages")
-                                            .and_then(|m| m.as_array())
-                                            .and_then(|m| m.last())  // Get the last message (user's prompt)
-                                            .and_then(|m| m.get("content"))
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or_default();
-
-                                        let openai_request = serde_json::json!({
-                                            "model": model,
-                                            "messages": [
-                                                {
-                                                    "role": "system",
-                                                    "content": "You are a helpful assistant"
-                                                },
-                                                {
-                                                    "role": "user",
-                                                    "content": prompt
-                                                }
-                                            ]
-                                        });
+                                        let url = if model.contains("gpt-4o") {
+                                            "https://api.openai-sb.com/v1/chat/completions"
+                                        } else {
+                                            "https://api.openai.com/v1/chat/completions"
+                                        };
 
                                         if debug {
                                             println!("Worker {}: Sending request to API", worker_id);
                                         }
 
-                                        let response = client.post("https://api.openai.com/v1/chat/completions")
+                                        client.post(url)
                                             .header("Authorization", format!("Bearer {}", api_key))
                                             .header("Content-Type", "application/json")
-                                            .header("Accept", "application/json")
-                                            .header("Connection", "keep-alive")
-                                            .json(&openai_request)
+                                            .header("Accept", "text/event-stream")
+                                            .json(&request_body)
                                             .send()
-                                            .await;
-
-                                        if debug {
-                                            println!("Worker {}: Got API response: {:?}", worker_id, response.is_ok());
-                                        }
-
-                                        response
+                                            .await
                                     },
                                     "groq" => {
                                         let mut request_body = request_json.clone();
@@ -300,13 +286,42 @@ impl BhumiCore {
                                         tokio::pin!(stream);
                                         while let Some(chunk_result) = stream.next().await {
                                             if let Ok(bytes) = chunk_result {
-                                                buffer.reserve(bytes.len());
-                                                buffer.extend_from_slice(&bytes);
-                                                
-                                                if let Ok(text) = String::from_utf8(buffer.clone()) {
-                                                    if serde_json::from_str::<Value>(&text).is_ok() {
-                                                        response_tx.try_send(text).ok();
-                                                        break;
+                                                if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
+                                                    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                                                        for line in text.lines() {
+                                                            if !line.is_empty() {
+                                                                if line == "data: [DONE]" {
+                                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                                    chunks.push_back("[DONE]".to_string());
+                                                                    break;  // Important: break the streaming loop
+                                                                } else if line.starts_with("data: ") {
+                                                                    if let Ok(chunk_json) = serde_json::from_str::<Value>(
+                                                                        line.trim_start_matches("data: ")
+                                                                    ) {
+                                                                        // Extract just the content from the delta
+                                                                        if let Some(content) = chunk_json
+                                                                            .get("choices")
+                                                                            .and_then(|c| c.get(0))
+                                                                            .and_then(|c| c.get("delta"))
+                                                                            .and_then(|d| d.get("content"))
+                                                                            .and_then(|c| c.as_str()) 
+                                                                        {
+                                                                            let mut chunks = stream_chunks.lock().unwrap();
+                                                                            chunks.push_back(content.to_string());
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    // Non-streaming response handling
+                                                    buffer.extend_from_slice(&bytes);
+                                                    if let Ok(text) = String::from_utf8(buffer.clone()) {
+                                                        if serde_json::from_str::<Value>(&text).is_ok() {
+                                                            response_tx.try_send(text).ok();
+                                                            break;
+                                                        }
                                                     }
                                                 }
                                             }
@@ -347,6 +362,7 @@ impl BhumiCore {
             model: model.to_string(),
             use_grounding,
             provider,
+            stream_chunks,
         })
     }
 
@@ -448,6 +464,22 @@ impl BhumiCore {
             let active = self.active_requests.read().await;
             Ok(*active == 0)
         })
+    }
+
+    fn _get_stream_chunk(&self) -> Option<String> {
+        let mut chunks = self.stream_chunks.lock().unwrap();
+        chunks.pop_front()
+    }
+    
+    fn _process_stream_response(&self, response: String) {
+        // Split response into SSE chunks
+        for line in response.lines() {
+            if line.starts_with("data: ") {
+                let chunk = line.trim_start_matches("data: ").to_string();
+                let mut chunks = self.stream_chunks.lock().unwrap();
+                chunks.push_back(chunk);
+            }
+        }
     }
 }
 

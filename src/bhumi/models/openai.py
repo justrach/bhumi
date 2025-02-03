@@ -1,45 +1,60 @@
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from satya import Model, Field, List
+from typing import Optional
 
-class Message(BaseModel):
+class Message(Model):
     role: str
     content: str
-    name: Optional[str] = None
+    refusal: Optional[str] = Field(required=False)
 
-class Choice(BaseModel):
-    index: int
-    message: Message
-    finish_reason: str
-    logprobs: Optional[Any] = None
+class TokenDetails(Model):
+    cached_tokens: int
+    audio_tokens: int
 
-class Usage(BaseModel):
+class CompletionTokenDetails(Model):
+    reasoning_tokens: int
+    audio_tokens: int
+    accepted_prediction_tokens: int
+    rejected_prediction_tokens: int
+
+class Usage(Model):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    prompt_tokens_details: TokenDetails
+    completion_tokens_details: CompletionTokenDetails
 
-class OpenAIResponse(BaseModel):
+class Choice(Model):
+    index: int
+    message: Message
+    logprobs: Optional[dict] = Field(required=False)
+    finish_reason: str
+
+class OpenAIResponse(Model):
     id: str
     object: str
     created: int
     model: str
     choices: List[Choice]
     usage: Usage
-    system_fingerprint: Optional[str] = None
+    service_tier: str
+    system_fingerprint: Optional[str] = Field(required=False)
 
-    @property
-    def text(self) -> str:
-        return self.choices[0].message.content if self.choices else ""
+class DeltaMessage(Model):
+    role: Optional[str] = Field(required=False)
+    content: Optional[str] = Field(required=False)
+    refusal: Optional[str] = Field(required=False)
 
-class OpenAIRequest(BaseModel):
+class StreamChoice(Model):
+    index: int
+    delta: DeltaMessage
+    logprobs: Optional[dict] = Field(required=False)
+    finish_reason: Optional[str] = Field(required=False)
+
+class OpenAIStreamChunk(Model):
+    id: str
+    object: str
+    created: int
     model: str
-    messages: List[Message]
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    n: Optional[int] = None
-    stream: Optional[bool] = None
-    stop: Optional[List[str]] = None
-    max_tokens: Optional[int] = None
-    presence_penalty: Optional[float] = None
-    frequency_penalty: Optional[float] = None
-    logit_bias: Optional[Dict[str, float]] = None
-    user: Optional[str] = None
+    service_tier: str
+    system_fingerprint: Optional[str] = Field(required=False)
+    choices: List[StreamChoice]
