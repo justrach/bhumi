@@ -6,6 +6,9 @@ use serde_json::Value;
 use futures_util::StreamExt;
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use tokio::time::sleep;
+use std::time::Duration;
+use std::future::Future;
 
 mod anthropic;
 mod gemini;
@@ -209,13 +212,7 @@ impl BhumiCore {
                                             println!("Worker {}: Sending request to API", worker_id);
                                         }
 
-                                        client.post(url)
-                                            .header("Authorization", format!("Bearer {}", api_key))
-                                            .header("Content-Type", "application/json")
-                                            .header("Accept", "text/event-stream")
-                                            .json(&request_body)
-                                            .send()
-                                            .await
+                                        process_request(&client, url, &request_body, api_key, debug).await
                                     },
                                     "groq" => {
                                         let mut request_body = request_json.clone();
@@ -497,6 +494,58 @@ impl LLMResponse {
             raw_response: serde_json::to_string(&response).unwrap_or_default(),
         }
     }
+}
+
+// Add a retry helper function
+async fn retry_with_backoff<F, Fut, T, E>(
+    mut f: F,
+    max_retries: u32,
+    initial_delay_ms: u64,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let mut retries = 0;
+    let mut delay = initial_delay_ms;
+
+    loop {
+        match f().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                if retries >= max_retries {
+                    return Err(e);
+                }
+                retries += 1;
+                sleep(Duration::from_millis(delay)).await;
+                delay *= 2; // Exponential backoff
+            }
+        }
+    }
+}
+
+// Now update the actual request sending to use retry
+async fn process_request(
+    client: &reqwest::Client,
+    url: &str,
+    request_json: &Value,
+    api_key: &str,
+    debug: bool,
+) -> Result<reqwest::Response, reqwest::Error> {
+    retry_with_backoff(
+        || async {
+            client
+                .post(url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(request_json)
+                .send()
+                .await
+        },
+        3, // max retries
+        100, // initial delay in ms
+    )
+    .await
 }
 
 #[pymodule]
