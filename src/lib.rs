@@ -49,8 +49,8 @@ impl BhumiCore {
     #[new]
     #[pyo3(signature = (
         max_concurrent,
-        provider="anthropic",
-        model="claude-3-sonnet-20240229",
+        provider="",  // Empty string by default
+        model="",
         use_grounding=false,
         debug=false,
         stream_buffer_size=1000,
@@ -98,21 +98,9 @@ impl BhumiCore {
 
         let stream_chunks = Arc::new(Mutex::new(VecDeque::new()));
 
-        let base_url = match (provider.as_str(), base_url) {
-            ("openai", Some(url)) => url.to_string(),
-            ("openai", None) => {
-                if model.contains("gpt-4o") {
-                    "https://api.openai-sb.com/v1".to_string()
-                } else {
-                    "https://api.openai.com/v1".to_string()
-                }
-            },
-            ("anthropic", Some(url)) => url.to_string(),
-            ("anthropic", None) => "https://api.anthropic.com/v1".to_string(),
-            // Add other providers here...
-            _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                format!("Unsupported provider: {}", provider)
-            )),
+        let base_url = match base_url {
+            Some(url) => url.to_string(),
+            None => "".to_string(),  // Empty string by default
         };
 
         // Spawn workers
@@ -162,148 +150,38 @@ impl BhumiCore {
                                 if debug {
                                     println!("Worker {}: Got API key", worker_id);
                                 }
-                                let response = match provider.as_str() {
-                                    "anthropic" => {
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                let response = if provider == "openai" {
+                                    // OpenAI specific handling
+                                    let mut request_body = request_json.clone();
+                                    request_body.as_object_mut().map(|obj| obj.remove("_headers"));
 
-                                        client.post("https://api.anthropic.com/v1/messages")
-                                            .header("x-api-key", api_key)
-                                            .header("anthropic-version", "2023-06-01")
-                                            .header("content-type", "application/json")
-                                            .header("connection", "keep-alive")
-                                            .json(&request_body)
-                                            .send()
-                                            .await
-                                    },
-                                    "gemini" => {
-                                        if debug {
-                                            println!("Worker {}: Processing Gemini request, model: {}", worker_id, model);
-                                        }
-    
-                                        let prompt = request_json
-                                            .get("messages")
-                                            .and_then(|m| m.as_array())
-                                            .and_then(|m| m.first())
-                                            .and_then(|m| m.get("content"))
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or_default();
-    
-                                        let gemini_request = GeminiRequest {
-                                            contents: vec![gemini::Content {
-                                                parts: vec![gemini::Part {
-                                                    text: prompt.to_string(),
-                                                }],
-                                                role: Some("user".to_string()),
-                                            }],
-                                            tools: if use_grounding {
-                                                Some(vec![gemini::Tool {
-                                                    google_search: Some(gemini::GoogleSearch {}),
-                                                }])
-                                            } else {
-                                                None
-                                            },
-                                        };
-    
-                                        let url = format!(
-                                            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-                                            model, api_key
-                                        );
-    
-                                        if debug {
-                                            println!("Worker {}: Sending request to API, size: {} bytes", worker_id, 
-                                                serde_json::to_string(&gemini_request).unwrap_or_default().len());
-                                        }
-    
-                                        let response = client.post(&url)
-                                            .header("Content-Type", "application/json")
-                                            .json(&gemini_request)
-                                            .send()
-                                            .await;
-    
-                                        if debug {
-                                            if let Ok(resp) = &response {
-                                                println!("Worker {}: Got response status: {}", worker_id, resp.status());
-                                            }
-                                        }
-    
-                                        response
-                                    },
-                                    "openai" => {
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                    if debug {
+                                        println!("Worker {}: Processing OpenAI request", worker_id);
+                                    }
 
-                                        if debug {
-                                            println!("Worker {}: Processing OpenAI request", worker_id);
-                                        }
+                                    let url = format!("{}/chat/completions", base_url);
 
-                                        let url = format!("{}/chat/completions", base_url);
+                                    if debug {
+                                        println!("Worker {}: Sending request to API: {}", worker_id, url);
+                                    }
 
-                                        if debug {
-                                            println!("Worker {}: Sending request to API: {}", worker_id, url);
-                                        }
+                                    process_request(&client, &url, &request_body, api_key, debug).await
+                                } else {
+                                    // Generic OpenAI-compatible API handler
+                                    let mut request_body = request_json.clone();
+                                    request_body.as_object_mut().map(|obj| obj.remove("_headers"));
 
-                                        process_request(&client, &url, &request_body, api_key, debug).await
-                                    },
-                                    "groq" => {
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                    if debug {
+                                        println!("Worker {}: Processing request", worker_id);
+                                    }
 
-                                        if debug {
-                                            println!("Worker {}: Processing Groq request", worker_id);
-                                            println!("Worker {}: Request body: {}", worker_id, 
-                                                serde_json::to_string(&request_body).unwrap_or_default());
-                                        }
+                                    let url = format!("{}/chat/completions", base_url);
 
-                                        let response = client.post("https://api.groq.com/openai/v1/chat/completions")
-                                            .header("Authorization", format!("Bearer {}", api_key))
-                                            .header("Content-Type", "application/json")
-                                            .json(&request_body)
-                                            .send()
-                                            .await;
+                                    if debug {
+                                        println!("Worker {}: Sending request to API: {}", worker_id, url);
+                                    }
 
-                                        if debug && response.is_ok() {
-                                            println!("Worker {}: Got response status: {}", worker_id, 
-                                                response.as_ref().unwrap().status());
-                                        }
-
-                                        response
-                                    },
-                                    "sambanova" => {
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
-
-                                        // Enable streaming by default for SambaNova
-                                        if let Some(obj) = request_body.as_object_mut() {
-                                            obj.insert("stream".to_string(), serde_json::json!(true));
-                                        }
-
-                                        if debug {
-                                            println!("Worker {}: Processing SambaNova request", worker_id);
-                                            println!("Worker {}: Request body: {}", worker_id, 
-                                                serde_json::to_string(&request_body).unwrap_or_default());
-                                        }
-
-                                        let response = client.post("https://api.sambanova.ai/v1/chat/completions")
-                                            .header("Authorization", format!("Bearer {}", api_key))
-                                            .header("Content-Type", "application/json")
-                                            .json(&request_body)
-                                            .send()
-                                            .await;
-
-                                        if debug && response.is_ok() {
-                                            println!("Worker {}: Got response status: {}", worker_id, 
-                                                response.as_ref().unwrap().status());
-                                        }
-
-                                        response
-                                    },
-                                    _ => {
-                                        let client = reqwest::Client::new();
-                                        client.get("invalid://url")
-                                            .send()
-                                            .await
-                                    },
+                                    process_request(&client, &url, &request_body, api_key, debug).await
                                 };
 
                                 let _response: Result<(), reqwest::Error> = match response {
@@ -396,7 +274,7 @@ impl BhumiCore {
     }
 
     fn completion(&self, model: &str, messages: &PyAny, api_key: &str) -> PyResult<LLMResponse> {
-        let (provider, model_name) = match model.split_once('/') {
+        let (_provider, _model_name) = match model.split_once('/') {
             Some((p, m)) => (p, m),
             None => (model, model),
         };

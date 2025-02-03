@@ -11,7 +11,7 @@ class LLMConfig:
     api_key: str
     base_url: str
     model: str
-    provider: str = "openai"  # Default to OpenAI-style API
+    provider: Optional[str] = None  # Optional now, defaults to OpenAI-compatible
     api_version: Optional[str] = None
     organization: Optional[str] = None
     max_retries: int = 3
@@ -20,7 +20,7 @@ class LLMConfig:
     debug: bool = False
 
 class BaseLLMClient:
-    """Generic client for LLM providers following OpenAI-style API"""
+    """Generic client for OpenAI-compatible APIs"""
     
     def __init__(
         self,
@@ -31,7 +31,7 @@ class BaseLLMClient:
         self.config = config
         self.core = _rust.BhumiCore(
             max_concurrent=max_concurrent,
-            provider=config.provider,
+            provider=config.provider or "generic",  # Use generic if no provider specified
             model=config.model,
             debug=debug,
             base_url=config.base_url
