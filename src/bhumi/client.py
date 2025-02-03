@@ -8,7 +8,6 @@ import time
 # Get the root module (the Rust implementation)
 import bhumi.bhumi as _rust
 from .models.openai import OpenAIResponse, Message, Choice, Usage, TokenDetails, CompletionTokenDetails, OpenAIStreamChunk
-from .providers import SambanovaLLM, GroqLLM
 
 @dataclass
 class CompletionResponse:
@@ -187,21 +186,6 @@ class OpenAIClient(AsyncLLMClient):
             debug=debug
         )
 
-    # Add provider-specific handlers
-    def __init__(self, max_concurrent: int = 30, provider: str = "openai", debug: bool = False):
-        super().__init__(
-            max_concurrent=max_concurrent,
-            provider=provider,
-            model=model,
-            debug=debug
-        )
-        
-        # Add provider-specific handlers
-        self.providers = {
-            "sambanova": SambanovaLLM(),
-            "groq": GroqLLM()
-        }
-
     async def acompletion(
         self,
         model: str,
@@ -280,28 +264,3 @@ class OpenAIClient(AsyncLLMClient):
                 raise TimeoutError("Request timed out")
             
             await asyncio.sleep(0.1)
-
-    async def astream_completion(self, model: str, messages: List[Dict[str, str]], api_key: str, **kwargs):
-        provider_name = model.split('/', 1)[0] if '/' in model else model
-        
-        if provider_name in self.providers:
-            provider = self.providers[provider_name]
-            request = {
-                "_headers": {
-                    provider.config.api_key_header.split(": ")[0]: api_key
-                },
-                **provider.prepare_request(messages, stream=True, **kwargs)
-            }
-            
-            self._client._submit(json.dumps(request))
-            
-            # Rest of streaming code remains the same
-            while True:
-                chunk = self._client._get_stream_chunk()
-                if chunk == "[DONE]":
-                    break
-                    
-                if chunk:
-                    yield chunk
-                    
-                await asyncio.sleep(0.01)

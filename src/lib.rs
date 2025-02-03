@@ -10,11 +10,9 @@ use std::sync::Mutex;
 mod anthropic;
 mod gemini;
 mod openai;
-mod base_llm;
 
 use gemini::{GeminiRequest, GeminiResponse};
 use openai::OpenAIResponse;
-use base_llm::{BaseLLM, BaseLLMConfig};
 
 // Response type to handle completions
 #[pyclass]
@@ -179,11 +177,19 @@ impl BhumiCore {
                                                 serde_json::to_string(&gemini_request).unwrap_or_default().len());
                                         }
     
-                                        client.post(&url)
+                                        let response = client.post(&url)
                                             .header("Content-Type", "application/json")
                                             .json(&gemini_request)
                                             .send()
-                                            .await
+                                            .await;
+    
+                                        if debug {
+                                            if let Ok(resp) = &response {
+                                                println!("Worker {}: Got response status: {}", worker_id, resp.status());
+                                            }
+                                        }
+    
+                                        response
                                     },
                                     "openai" => {
                                         let mut request_body = request_json.clone();
@@ -263,21 +269,6 @@ impl BhumiCore {
                                         }
 
                                         response
-                                    },
-                                    provider if provider.starts_with("base_") => {
-                                        let llm = BaseLLM::new(
-                                            BaseLLMConfig {
-                                                api_base: "https://api.example.com".to_string(),
-                                                api_key_header: "Authorization: Bearer".to_string(),
-                                                model_path: "/v1/completions".to_string(),
-                                                stream_marker: "data: [DONE]".to_string(),
-                                                stream_field_path: vec!["choices".to_string(), "0".to_string(), "delta".to_string(), "content".to_string()],
-                                                content_field_path: vec!["choices".to_string(), "0".to_string(), "message".to_string(), "content".to_string()],
-                                            },
-                                            client.clone(),
-                                            stream_chunks.clone()
-                                        );
-                                        llm.process_request(&request_json, api_key, debug, worker_id).await
                                     },
                                     _ => {
                                         let client = reqwest::Client::new();
@@ -376,7 +367,7 @@ impl BhumiCore {
     }
 
     fn completion(&self, model: &str, messages: &PyAny, api_key: &str) -> PyResult<LLMResponse> {
-        let (_provider, model_name) = match model.split_once('/') {
+        let (provider, model_name) = match model.split_once('/') {
             Some((p, m)) => (p, m),
             None => (model, model),
         };
