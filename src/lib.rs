@@ -4,6 +4,11 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use serde_json::Value;
 use futures_util::StreamExt;
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use tokio::time::sleep;
+use std::time::Duration;
+use std::future::Future;
 
 mod anthropic;
 mod gemini;
@@ -35,13 +40,31 @@ struct BhumiCore {
     model: String,
     use_grounding: bool,
     provider: String,  // "anthropic", "gemini", "openai", "groq", or "sambanova"
+    stream_chunks: Arc<Mutex<VecDeque<String>>>,
+    base_url: String,  // Add base URL field
 }
 
 #[pymethods]
 impl BhumiCore {
     #[new]
-    #[pyo3(signature = (max_concurrent, provider="anthropic", model="claude-3-sonnet-20240229", use_grounding=false, debug=false, stream_buffer_size=1000))]
-    fn new(max_concurrent: usize, provider: &str, model: &str, use_grounding: bool, debug: bool, stream_buffer_size: usize) -> PyResult<Self> {
+    #[pyo3(signature = (
+        max_concurrent,
+        provider="",  // Empty string by default
+        model="",
+        use_grounding=false,
+        debug=false,
+        stream_buffer_size=1000,
+        base_url=None
+    ))]
+    fn new(
+        max_concurrent: usize,
+        provider: &str,
+        model: &str,
+        use_grounding: bool,
+        debug: bool,
+        stream_buffer_size: usize,
+        base_url: Option<&str>,
+    ) -> PyResult<Self> {
         let (request_tx, request_rx) = mpsc::channel::<String>(100_000);
         let (response_tx, response_rx) = mpsc::channel::<String>(100_000);
         
@@ -73,6 +96,13 @@ impl BhumiCore {
             .unwrap();
         let client = Arc::new(client);
 
+        let stream_chunks = Arc::new(Mutex::new(VecDeque::new()));
+
+        let base_url = match base_url {
+            Some(url) => url.to_string(),
+            None => "".to_string(),  // Empty string by default
+        };
+
         // Spawn workers
         for worker_id in 0..max_concurrent {
             let request_rx = request_rx.clone();
@@ -83,6 +113,8 @@ impl BhumiCore {
             let provider = provider.clone();
             let model = model.to_string();
             let use_grounding = use_grounding;
+            let stream_chunks = stream_chunks.clone();
+            let base_url = base_url.clone();
             
             runtime.spawn(async move {
                 if debug {
@@ -118,178 +150,38 @@ impl BhumiCore {
                                 if debug {
                                     println!("Worker {}: Got API key", worker_id);
                                 }
-                                let response = match provider.as_str() {
-                                    "anthropic" => {
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                let response = if provider == "openai" {
+                                    // OpenAI specific handling
+                                    let mut request_body = request_json.clone();
+                                    request_body.as_object_mut().map(|obj| obj.remove("_headers"));
 
-                                        client.post("https://api.anthropic.com/v1/messages")
-                                            .header("x-api-key", api_key)
-                                            .header("anthropic-version", "2023-06-01")
-                                            .header("content-type", "application/json")
-                                            .header("connection", "keep-alive")
-                                            .json(&request_body)
-                                            .send()
-                                            .await
-                                    },
-                                    "gemini" => {
-                                        if debug {
-                                            println!("Worker {}: Processing Gemini request, model: {}", worker_id, model);
-                                        }
-    
-                                        let prompt = request_json
-                                            .get("messages")
-                                            .and_then(|m| m.as_array())
-                                            .and_then(|m| m.first())
-                                            .and_then(|m| m.get("content"))
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or_default();
-    
-                                        let gemini_request = GeminiRequest {
-                                            contents: vec![gemini::Content {
-                                                parts: vec![gemini::Part {
-                                                    text: prompt.to_string(),
-                                                }],
-                                                role: Some("user".to_string()),
-                                            }],
-                                            tools: if use_grounding {
-                                                Some(vec![gemini::Tool {
-                                                    google_search: Some(gemini::GoogleSearch {}),
-                                                }])
-                                            } else {
-                                                None
-                                            },
-                                        };
-    
-                                        let url = format!(
-                                            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-                                            model, api_key
-                                        );
-    
-                                        if debug {
-                                            println!("Worker {}: Sending request to API, size: {} bytes", worker_id, 
-                                                serde_json::to_string(&gemini_request).unwrap_or_default().len());
-                                        }
-    
-                                        let response = client.post(&url)
-                                            .header("Content-Type", "application/json")
-                                            .json(&gemini_request)
-                                            .send()
-                                            .await;
-    
-                                        if debug {
-                                            if let Ok(resp) = &response {
-                                                println!("Worker {}: Got response status: {}", worker_id, resp.status());
-                                            }
-                                        }
-    
-                                        response
-                                    },
-                                    "openai" => {
-                                        if debug {
-                                            println!("Worker {}: Processing OpenAI request", worker_id);
-                                        }
+                                    if debug {
+                                        println!("Worker {}: Processing OpenAI request", worker_id);
+                                    }
 
-                                        let prompt = request_json
-                                            .get("messages")
-                                            .and_then(|m| m.as_array())
-                                            .and_then(|m| m.last())  // Get the last message (user's prompt)
-                                            .and_then(|m| m.get("content"))
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or_default();
+                                    let url = format!("{}/chat/completions", base_url);
 
-                                        let openai_request = serde_json::json!({
-                                            "model": model,
-                                            "messages": [
-                                                {
-                                                    "role": "system",
-                                                    "content": "You are a helpful assistant"
-                                                },
-                                                {
-                                                    "role": "user",
-                                                    "content": prompt
-                                                }
-                                            ]
-                                        });
+                                    if debug {
+                                        println!("Worker {}: Sending request to API: {}", worker_id, url);
+                                    }
 
-                                        if debug {
-                                            println!("Worker {}: Sending request to API", worker_id);
-                                        }
+                                    process_request(&client, &url, &request_body, api_key, debug).await
+                                } else {
+                                    // Generic OpenAI-compatible API handler
+                                    let mut request_body = request_json.clone();
+                                    request_body.as_object_mut().map(|obj| obj.remove("_headers"));
 
-                                        let response = client.post("https://api.openai.com/v1/chat/completions")
-                                            .header("Authorization", format!("Bearer {}", api_key))
-                                            .header("Content-Type", "application/json")
-                                            .header("Accept", "application/json")
-                                            .header("Connection", "keep-alive")
-                                            .json(&openai_request)
-                                            .send()
-                                            .await;
+                                    if debug {
+                                        println!("Worker {}: Processing request", worker_id);
+                                    }
 
-                                        if debug {
-                                            println!("Worker {}: Got API response: {:?}", worker_id, response.is_ok());
-                                        }
+                                    let url = format!("{}/chat/completions", base_url);
 
-                                        response
-                                    },
-                                    "groq" => {
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                    if debug {
+                                        println!("Worker {}: Sending request to API: {}", worker_id, url);
+                                    }
 
-                                        if debug {
-                                            println!("Worker {}: Processing Groq request", worker_id);
-                                            println!("Worker {}: Request body: {}", worker_id, 
-                                                serde_json::to_string(&request_body).unwrap_or_default());
-                                        }
-
-                                        let response = client.post("https://api.groq.com/openai/v1/chat/completions")
-                                            .header("Authorization", format!("Bearer {}", api_key))
-                                            .header("Content-Type", "application/json")
-                                            .json(&request_body)
-                                            .send()
-                                            .await;
-
-                                        if debug && response.is_ok() {
-                                            println!("Worker {}: Got response status: {}", worker_id, 
-                                                response.as_ref().unwrap().status());
-                                        }
-
-                                        response
-                                    },
-                                    "sambanova" => {
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
-
-                                        // Enable streaming by default for SambaNova
-                                        if let Some(obj) = request_body.as_object_mut() {
-                                            obj.insert("stream".to_string(), serde_json::json!(true));
-                                        }
-
-                                        if debug {
-                                            println!("Worker {}: Processing SambaNova request", worker_id);
-                                            println!("Worker {}: Request body: {}", worker_id, 
-                                                serde_json::to_string(&request_body).unwrap_or_default());
-                                        }
-
-                                        let response = client.post("https://api.sambanova.ai/v1/chat/completions")
-                                            .header("Authorization", format!("Bearer {}", api_key))
-                                            .header("Content-Type", "application/json")
-                                            .json(&request_body)
-                                            .send()
-                                            .await;
-
-                                        if debug && response.is_ok() {
-                                            println!("Worker {}: Got response status: {}", worker_id, 
-                                                response.as_ref().unwrap().status());
-                                        }
-
-                                        response
-                                    },
-                                    _ => {
-                                        let client = reqwest::Client::new();
-                                        client.get("invalid://url")
-                                            .send()
-                                            .await
-                                    },
+                                    process_request(&client, &url, &request_body, api_key, debug).await
                                 };
 
                                 let _response: Result<(), reqwest::Error> = match response {
@@ -300,13 +192,42 @@ impl BhumiCore {
                                         tokio::pin!(stream);
                                         while let Some(chunk_result) = stream.next().await {
                                             if let Ok(bytes) = chunk_result {
-                                                buffer.reserve(bytes.len());
-                                                buffer.extend_from_slice(&bytes);
-                                                
-                                                if let Ok(text) = String::from_utf8(buffer.clone()) {
-                                                    if serde_json::from_str::<Value>(&text).is_ok() {
-                                                        response_tx.try_send(text).ok();
-                                                        break;
+                                                if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
+                                                    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                                                        for line in text.lines() {
+                                                            if !line.is_empty() {
+                                                                if line == "data: [DONE]" {
+                                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                                    chunks.push_back("[DONE]".to_string());
+                                                                    break;  // Important: break the streaming loop
+                                                                } else if line.starts_with("data: ") {
+                                                                    if let Ok(chunk_json) = serde_json::from_str::<Value>(
+                                                                        line.trim_start_matches("data: ")
+                                                                    ) {
+                                                                        // Extract just the content from the delta
+                                                                        if let Some(content) = chunk_json
+                                                                            .get("choices")
+                                                                            .and_then(|c| c.get(0))
+                                                                            .and_then(|c| c.get("delta"))
+                                                                            .and_then(|d| d.get("content"))
+                                                                            .and_then(|c| c.as_str()) 
+                                                                        {
+                                                                            let mut chunks = stream_chunks.lock().unwrap();
+                                                                            chunks.push_back(content.to_string());
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    // Non-streaming response handling
+                                                    buffer.extend_from_slice(&bytes);
+                                                    if let Ok(text) = String::from_utf8(buffer.clone()) {
+                                                        if serde_json::from_str::<Value>(&text).is_ok() {
+                                                            response_tx.try_send(text).ok();
+                                                            break;
+                                                        }
                                                     }
                                                 }
                                             }
@@ -347,11 +268,13 @@ impl BhumiCore {
             model: model.to_string(),
             use_grounding,
             provider,
+            stream_chunks,
+            base_url,
         })
     }
 
     fn completion(&self, model: &str, messages: &PyAny, api_key: &str) -> PyResult<LLMResponse> {
-        let (provider, model_name) = match model.split_once('/') {
+        let (_provider, _model_name) = match model.split_once('/') {
             Some((p, m)) => (p, m),
             None => (model, model),
         };
@@ -449,6 +372,22 @@ impl BhumiCore {
             Ok(*active == 0)
         })
     }
+
+    fn _get_stream_chunk(&self) -> Option<String> {
+        let mut chunks = self.stream_chunks.lock().unwrap();
+        chunks.pop_front()
+    }
+    
+    fn _process_stream_response(&self, response: String) {
+        // Split response into SSE chunks
+        for line in response.lines() {
+            if line.starts_with("data: ") {
+                let chunk = line.trim_start_matches("data: ").to_string();
+                let mut chunks = self.stream_chunks.lock().unwrap();
+                chunks.push_back(chunk);
+            }
+        }
+    }
 }
 
 impl LLMResponse {
@@ -465,6 +404,58 @@ impl LLMResponse {
             raw_response: serde_json::to_string(&response).unwrap_or_default(),
         }
     }
+}
+
+// Add a retry helper function
+async fn retry_with_backoff<F, Fut, T, E>(
+    mut f: F,
+    max_retries: u32,
+    initial_delay_ms: u64,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+{
+    let mut retries = 0;
+    let mut delay = initial_delay_ms;
+
+    loop {
+        match f().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                if retries >= max_retries {
+                    return Err(e);
+                }
+                retries += 1;
+                sleep(Duration::from_millis(delay)).await;
+                delay *= 2; // Exponential backoff
+            }
+        }
+    }
+}
+
+// Now update the actual request sending to use retry
+async fn process_request(
+    client: &reqwest::Client,
+    url: &str,
+    request_json: &Value,
+    api_key: &str,
+    debug: bool,
+) -> Result<reqwest::Response, reqwest::Error> {
+    retry_with_backoff(
+        || async {
+            client
+                .post(url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .json(request_json)
+                .send()
+                .await
+        },
+        3, // max retries
+        100, // initial delay in ms
+    )
+    .await
 }
 
 #[pymodule]
