@@ -1,6 +1,6 @@
 import json
 import sys
-from typing import List, Dict, Optional, Union, AsyncIterator
+from typing import List, Dict, Optional, Union, AsyncIterator, Any
 from dataclasses import dataclass
 import asyncio
 import time
@@ -8,6 +8,12 @@ import time
 # Get the root module (the Rust implementation)
 import bhumi.bhumi as _rust
 from .models.openai import OpenAIResponse, Message, Choice, Usage, TokenDetails, CompletionTokenDetails, OpenAIStreamChunk
+
+# Export BhumiCore directly from _rust
+BhumiCore = _rust.BhumiCore
+
+# Export in __all__
+__all__ = ['OpenAIClient', 'BhumiCore']
 
 @dataclass
 class CompletionResponse:

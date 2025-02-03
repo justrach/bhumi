@@ -41,13 +41,30 @@ struct BhumiCore {
     use_grounding: bool,
     provider: String,  // "anthropic", "gemini", "openai", "groq", or "sambanova"
     stream_chunks: Arc<Mutex<VecDeque<String>>>,
+    base_url: String,  // Add base URL field
 }
 
 #[pymethods]
 impl BhumiCore {
     #[new]
-    #[pyo3(signature = (max_concurrent, provider="anthropic", model="claude-3-sonnet-20240229", use_grounding=false, debug=false, stream_buffer_size=1000))]
-    fn new(max_concurrent: usize, provider: &str, model: &str, use_grounding: bool, debug: bool, stream_buffer_size: usize) -> PyResult<Self> {
+    #[pyo3(signature = (
+        max_concurrent,
+        provider="anthropic",
+        model="claude-3-sonnet-20240229",
+        use_grounding=false,
+        debug=false,
+        stream_buffer_size=1000,
+        base_url=None
+    ))]
+    fn new(
+        max_concurrent: usize,
+        provider: &str,
+        model: &str,
+        use_grounding: bool,
+        debug: bool,
+        stream_buffer_size: usize,
+        base_url: Option<&str>,
+    ) -> PyResult<Self> {
         let (request_tx, request_rx) = mpsc::channel::<String>(100_000);
         let (response_tx, response_rx) = mpsc::channel::<String>(100_000);
         
@@ -81,6 +98,23 @@ impl BhumiCore {
 
         let stream_chunks = Arc::new(Mutex::new(VecDeque::new()));
 
+        let base_url = match (provider.as_str(), base_url) {
+            ("openai", Some(url)) => url.to_string(),
+            ("openai", None) => {
+                if model.contains("gpt-4o") {
+                    "https://api.openai-sb.com/v1".to_string()
+                } else {
+                    "https://api.openai.com/v1".to_string()
+                }
+            },
+            ("anthropic", Some(url)) => url.to_string(),
+            ("anthropic", None) => "https://api.anthropic.com/v1".to_string(),
+            // Add other providers here...
+            _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                format!("Unsupported provider: {}", provider)
+            )),
+        };
+
         // Spawn workers
         for worker_id in 0..max_concurrent {
             let request_rx = request_rx.clone();
@@ -92,6 +126,7 @@ impl BhumiCore {
             let model = model.to_string();
             let use_grounding = use_grounding;
             let stream_chunks = stream_chunks.clone();
+            let base_url = base_url.clone();
             
             runtime.spawn(async move {
                 if debug {
@@ -202,17 +237,13 @@ impl BhumiCore {
                                             println!("Worker {}: Processing OpenAI request", worker_id);
                                         }
 
-                                        let url = if model.contains("gpt-4o") {
-                                            "https://api.openai-sb.com/v1/chat/completions"
-                                        } else {
-                                            "https://api.openai.com/v1/chat/completions"
-                                        };
+                                        let url = format!("{}/chat/completions", base_url);
 
                                         if debug {
-                                            println!("Worker {}: Sending request to API", worker_id);
+                                            println!("Worker {}: Sending request to API: {}", worker_id, url);
                                         }
 
-                                        process_request(&client, url, &request_body, api_key, debug).await
+                                        process_request(&client, &url, &request_body, api_key, debug).await
                                     },
                                     "groq" => {
                                         let mut request_body = request_json.clone();
@@ -360,6 +391,7 @@ impl BhumiCore {
             use_grounding,
             provider,
             stream_chunks,
+            base_url,
         })
     }
 
