@@ -1,39 +1,31 @@
 import asyncio
 from bhumi.base_client import BaseLLMClient, LLMConfig
+import os 
+api_key = os.environ("GROQ")
 async def main():
-    # Example with OpenAI-compatible API
+    # Configure for Groq
     config = LLMConfig(
         api_key=api_key,
-        base_url="https://api.openai.com/v1",
-        model=MODEL,
-        provider="openai"
+        base_url="https://api.groq.com/openai/v1",
+        model="mixtral-8x7b-32768",
+        debug=True
     )
     
     client = BaseLLMClient(config, debug=True)
     
-    # Regular completion
+    # Test completion
     response = await client.completion([
         {"role": "user", "content": "Tell me a joke"}
     ])
-    print(f"Regular response: {response['text']}")
+    print(f"\nResponse: {response['text']}")
     
-    # Streaming completion
-    # print("\nStreaming response:")
-    # async for chunk in client.completion([
-    #     {"role": "user", "content": "Tell me a joke"}
-    # ], stream=True):
-    #     print(chunk, end="", flush=True)
-    
-    # # Example with custom API endpoint
-    # custom_config = LLMConfig(
-    #     api_key="your-api-key",
-    #     base_url="https://your-custom-endpoint.com/v1",
-    #     model="custom-model",
-    #     provider="custom"
-    # )
-    
-    # custom_client = BaseLLMClient(custom_config, debug=True)
-    # # Use the same interface with your custom endpoint
+    # Test streaming
+    print("\nStreaming response:")
+    async for chunk in await client.completion([
+        {"role": "user", "content": "Count to 5"}
+    ], stream=True):
+        print(chunk, end="", flush=True)
+    print("\n")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
