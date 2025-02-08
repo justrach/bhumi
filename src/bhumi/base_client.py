@@ -9,15 +9,31 @@ import asyncio
 class LLMConfig:
     """Configuration for LLM providers"""
     api_key: str
-    base_url: str
-    model: str
-    provider: Optional[str] = None  # Optional now, defaults to OpenAI-compatible
+    model: str  # Format: "provider/model_name" e.g. "openai/gpt-4"
+    base_url: Optional[str] = None  # Now optional
+    provider: Optional[str] = None  # Optional, extracted from model if not provided
     api_version: Optional[str] = None
     organization: Optional[str] = None
     max_retries: int = 3
     timeout: float = 30.0
     headers: Optional[Dict[str, str]] = None
     debug: bool = False
+
+    def __post_init__(self):
+        # Extract provider from model if not provided
+        if not self.provider and "/" in self.model:
+            self.provider = self.model.split("/")[0]
+        
+        # Set default base URL if not provided
+        if not self.base_url:
+            if self.provider == "openai":
+                self.base_url = "https://api.openai.com/v1"
+            elif self.provider == "anthropic":
+                self.base_url = "https://api.anthropic.com/v1"
+            elif self.provider == "gemini":
+                self.base_url = "https://generativelanguage.googleapis.com/v1/models"
+            else:
+                self.base_url = "https://api.openai.com/v1"  # Default to OpenAI
 
 class BaseLLMClient:
     """Generic client for OpenAI-compatible APIs"""
@@ -31,7 +47,7 @@ class BaseLLMClient:
         self.config = config
         self.core = _rust.BhumiCore(
             max_concurrent=max_concurrent,
-            provider=config.provider or "generic",  # Use generic if no provider specified
+            provider=config.provider or "generic",
             model=config.model,
             debug=debug,
             base_url=config.base_url
@@ -58,16 +74,32 @@ class BaseLLMClient:
         if stream:
             return self.astream_completion(messages, **kwargs)
         
-        # Prepare the request
+        # Extract actual model name if it contains provider prefix
+        model = self.config.model.split('/')[-1] if '/' in self.config.model else self.config.model
+        
+        # Prepare headers based on provider
+        if self.config.provider == "anthropic":
+            headers = {
+                "x-api-key": self.config.api_key
+            }
+        else:
+            headers = {
+                "Authorization": f"Bearer {self.config.api_key}"  # For OpenAI, Gemini etc
+            }
+        
+        # Prepare request with required fields
         request = {
-            "_headers": {
-                "Authorization": self.config.api_key
-            },
-            "model": self.config.model,
+            "_headers": headers,
+            "model": model,
             "messages": messages,
             "stream": False,
+            "max_tokens": kwargs.pop("max_tokens", 1024) if self.config.provider == "anthropic" else None,
             **kwargs
         }
+        
+        if self.debug:
+            print(f"Sending request with model: {model}")
+            print(f"Headers: {request['_headers']}")
         
         # Submit request
         self.core._submit(json.dumps(request))
@@ -96,13 +128,18 @@ class BaseLLMClient:
         **kwargs
     ) -> AsyncIterator[str]:
         """Stream completion responses"""
+        model = self.config.model.split('/')[-1] if '/' in self.config.model else self.config.model
+        
+        headers = {
+            "x-api-key": self.config.api_key if self.config.provider == "anthropic" else f"Bearer {self.config.api_key}"
+        }
+        
         request = {
-            "model": self.config.model,
+            "model": model,
             "messages": messages,
             "stream": True,
-            "_headers": {
-                "Authorization": self.config.api_key
-            },
+            "_headers": headers,
+            "max_tokens": kwargs.pop("max_tokens", 1024),
             **kwargs
         }
         
@@ -113,5 +150,20 @@ class BaseLLMClient:
             if chunk == "[DONE]":
                 break
             if chunk:
-                yield chunk
+                try:
+                    data = json.loads(chunk)
+                    if self.config.provider == "anthropic":
+                        # Handle Anthropic's SSE format
+                        if data.get("type") == "content_block_delta":
+                            delta = data.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                yield delta.get("text", "")
+                        elif data.get("type") == "message_stop":
+                            break
+                    else:
+                        # Handle other providers
+                        yield chunk
+                except json.JSONDecodeError:
+                    # If not JSON, yield raw chunk
+                    yield chunk
             await asyncio.sleep(0.01) 

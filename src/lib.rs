@@ -9,12 +9,12 @@ use std::sync::Mutex;
 use tokio::time::sleep;
 use std::time::Duration;
 use std::future::Future;
+use reqwest::header::{HeaderMap, HeaderValue};
 
 mod anthropic;
 mod gemini;
 mod openai;
 
-use gemini::{GeminiRequest, GeminiResponse};
 use openai::OpenAIResponse;
 
 // Response type to handle completions
@@ -41,7 +41,7 @@ struct BhumiCore {
     use_grounding: bool,
     provider: String,  // "anthropic", "gemini", "openai", "groq", or "sambanova"
     stream_chunks: Arc<Mutex<VecDeque<String>>>,
-    base_url: String,  // Add base URL field
+    base_url: Option<String>,  // Change to Option<String>
 }
 
 #[pymethods]
@@ -49,7 +49,7 @@ impl BhumiCore {
     #[new]
     #[pyo3(signature = (
         max_concurrent,
-        provider="",  // Empty string by default
+        provider="",
         model="",
         use_grounding=false,
         debug=false,
@@ -98,9 +98,24 @@ impl BhumiCore {
 
         let stream_chunks = Arc::new(Mutex::new(VecDeque::new()));
 
+        // Get base URL based on provider if not explicitly provided
         let base_url = match base_url {
             Some(url) => url.to_string(),
-            None => "".to_string(),  // Empty string by default
+            None => {
+                // Extract provider from model string if present
+                let provider_str = if model.contains('/') {
+                    model.split('/').next().unwrap_or("")
+                } else {
+                    &provider  // Borrow the String to get &str
+                };
+                
+                match provider_str {
+                    "openai" => "https://api.openai.com/v1".to_string(),
+                    "anthropic" => "https://api.anthropic.com/v1".to_string(),
+                    "gemini" => "https://generativelanguage.googleapis.com/v1/models".to_string(),
+                    _ => "".to_string()
+                }
+            }
         };
 
         // Spawn workers
@@ -140,48 +155,87 @@ impl BhumiCore {
                             }
                         }
 
+                        let _model = model.to_string();
+                        let _use_grounding = use_grounding;
+
                         if let Ok(request_json) = serde_json::from_str::<Value>(&request_str) {
-                            if let Some(api_key) = request_json
+                            let api_key = request_json
                                 .get("_headers")
                                 .and_then(|h| h.as_object())
-                                .and_then(|h| h.get(if provider == "anthropic" { "x-api-key" } else { "Authorization" }))
-                                .and_then(|k| k.as_str()) 
-                            {
+                                .and_then(|h| h.get("Authorization").or_else(|| h.get("x-api-key")))  // Try both header types
+                                .and_then(|k| k.as_str());
+
+                            if let Some(api_key) = api_key {
                                 if debug {
                                     println!("Worker {}: Got API key", worker_id);
                                 }
-                                let response = if provider == "openai" {
-                                    // OpenAI specific handling
-                                    let mut request_body = request_json.clone();
-                                    request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                
+                                let response = match provider.as_str() {
+                                    "gemini" => {
+                                        if debug {
+                                            println!("Worker {}: Processing Gemini request", worker_id);
+                                        }
 
-                                    if debug {
-                                        println!("Worker {}: Processing OpenAI request", worker_id);
+                                        let url = format!(
+                                            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                                            model,
+                                            api_key.trim_start_matches("Bearer ")
+                                        );
+
+                                        if debug {
+                                            println!("Worker {}: Sending request to API: {}", worker_id, url);
+                                        }
+
+                                        // Remove _headers from request before sending
+                                        let mut request_body = request_json.clone();
+                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+
+                                        client.post(&url)
+                                            .header("Content-Type", "application/json")
+                                            .json(&request_body)
+                                            .send()
+                                            .await
+                                    },
+                                    _ => {
+                                        let url = if provider == "anthropic" {
+                                            format!("{}/messages", base_url)
+                                        } else {
+                                            format!("{}/chat/completions", base_url)
+                                        };
+
+                                        // Set up headers based on provider
+                                        let mut headers = HeaderMap::new();
+                                        if provider == "anthropic" {
+                                            headers.insert(
+                                                "x-api-key",
+                                                HeaderValue::from_str(api_key).unwrap()
+                                            );
+                                            headers.insert(
+                                                "anthropic-version",
+                                                HeaderValue::from_str("2023-06-01").unwrap()
+                                            );
+                                        } else {
+                                            // For OpenAI, Groq etc.
+                                            headers.insert(
+                                                reqwest::header::AUTHORIZATION,
+                                                HeaderValue::from_str(api_key).unwrap()
+                                            );
+                                        }
+                                        headers.insert(
+                                            reqwest::header::CONTENT_TYPE,
+                                            HeaderValue::from_str("application/json").unwrap()
+                                        );
+
+                                        // Remove _headers from request before sending
+                                        let mut request_body = request_json.clone();
+                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+
+                                        client.post(&url)
+                                            .headers(headers)
+                                            .json(&request_body)
+                                            .send()
+                                            .await
                                     }
-
-                                    let url = format!("{}/chat/completions", base_url);
-
-                                    if debug {
-                                        println!("Worker {}: Sending request to API: {}", worker_id, url);
-                                    }
-
-                                    process_request(&client, &url, &request_body, api_key, debug).await
-                                } else {
-                                    // Generic OpenAI-compatible API handler
-                                    let mut request_body = request_json.clone();
-                                    request_body.as_object_mut().map(|obj| obj.remove("_headers"));
-
-                                    if debug {
-                                        println!("Worker {}: Processing request", worker_id);
-                                    }
-
-                                    let url = format!("{}/chat/completions", base_url);
-
-                                    if debug {
-                                        println!("Worker {}: Sending request to API: {}", worker_id, url);
-                                    }
-
-                                    process_request(&client, &url, &request_body, api_key, debug).await
                                 };
 
                                 let _response: Result<(), reqwest::Error> = match response {
@@ -196,24 +250,33 @@ impl BhumiCore {
                                                     if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                                                         for line in text.lines() {
                                                             if !line.is_empty() {
-                                                                if line == "data: [DONE]" {
-                                                                    let mut chunks = stream_chunks.lock().unwrap();
-                                                                    chunks.push_back("[DONE]".to_string());
-                                                                    break;  // Important: break the streaming loop
-                                                                } else if line.starts_with("data: ") {
-                                                                    if let Ok(chunk_json) = serde_json::from_str::<Value>(
-                                                                        line.trim_start_matches("data: ")
-                                                                    ) {
-                                                                        // Extract just the content from the delta
-                                                                        if let Some(content) = chunk_json
-                                                                            .get("choices")
-                                                                            .and_then(|c| c.get(0))
-                                                                            .and_then(|c| c.get("delta"))
-                                                                            .and_then(|d| d.get("content"))
-                                                                            .and_then(|c| c.as_str()) 
-                                                                        {
+                                                                if provider == "anthropic" {
+                                                                    // For Anthropic, forward the SSE data directly
+                                                                    if line.starts_with("data: ") {
+                                                                        let data = line.trim_start_matches("data: ");
+                                                                        let mut chunks = stream_chunks.lock().unwrap();
+                                                                        chunks.push_back(data.to_string());
+                                                                    }
+                                                                } else {
+                                                                    // Original handling for other providers
+                                                                    if line.starts_with("data: ") {
+                                                                        let data = line.trim_start_matches("data: ");
+                                                                        if data == "[DONE]" {
                                                                             let mut chunks = stream_chunks.lock().unwrap();
-                                                                            chunks.push_back(content.to_string());
+                                                                            chunks.push_back("[DONE]".to_string());
+                                                                            break;
+                                                                        }
+                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
+                                                                            if let Some(content) = json
+                                                                                .get("choices")
+                                                                                .and_then(|c| c.get(0))
+                                                                                .and_then(|c| c.get("delta"))
+                                                                                .and_then(|d| d.get("content"))
+                                                                                .and_then(|c| c.as_str()) 
+                                                                            {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back(content.to_string());
+                                                                            }
                                                                         }
                                                                     }
                                                                 }
@@ -242,8 +305,14 @@ impl BhumiCore {
                                 };
                             } else {
                                 if debug {
-                                    println!("Worker {}: Failed to get API key from headers", worker_id);
+                                    println!("Worker {}: Request JSON: {:?}", worker_id, request_json);
+                                    println!("Worker {}: Headers: {:?}", worker_id, request_json.get("_headers"));
                                 }
+                                println!("Worker {}: Failed to get API key from headers", worker_id);
+                            }
+                        } else {
+                            if debug {
+                                println!("Worker {}: Failed to parse request: {}", worker_id, request_str);
                             }
                         }
                     }
@@ -269,15 +338,25 @@ impl BhumiCore {
             use_grounding,
             provider,
             stream_chunks,
-            base_url,
+            base_url: Some(base_url),  // Store as Option
         })
     }
 
     fn completion(&self, model: &str, messages: &PyAny, api_key: &str) -> PyResult<LLMResponse> {
-        let (_provider, _model_name) = match model.split_once('/') {
+        let (provider, _model_name) = match model.split_once('/') {
             Some((p, m)) => (p, m),
             None => (model, model),
         };
+
+        // Get base URL from provider if not set
+        let _base_url = self.base_url.as_ref().map(|url| url.as_str()).unwrap_or_else(|| {
+            match provider {
+                "openai" => "https://api.openai.com/v1",
+                "anthropic" => "https://api.anthropic.com/v1",
+                "gemini" => "https://generativelanguage.googleapis.com/v1/models",
+                _ => ""
+            }
+        });
 
         let messages_json: Vec<serde_json::Value> = messages.extract::<Vec<&PyDict>>()?
             .iter()
@@ -303,7 +382,9 @@ impl BhumiCore {
             "_headers": {
                 "Authorization": api_key
             },
-            "messages": messages_json
+            "model": model,
+            "messages": messages_json,
+            "stream": false
         });
 
         self.submit(request.to_string())?;
@@ -311,22 +392,10 @@ impl BhumiCore {
         let start = std::time::Instant::now();
         while start.elapsed() < std::time::Duration::from_secs(30) {
             if let Some(response) = self.get_response()? {
-                match self.provider.as_str() {
-                    "gemini" => {
-                        if let Ok(gemini_resp) = serde_json::from_str::<GeminiResponse>(&response) {
-                            return Ok(LLMResponse {
-                                text: gemini_resp.get_text(),
-                                raw_response: response,
-                            });
-                        }
-                    },
-                    _ => {
-                        return Ok(LLMResponse {
-                            text: response.clone(),
-                            raw_response: response,
-                        });
-                    }
-                }
+                return Ok(LLMResponse {
+                    text: response.clone(),
+                    raw_response: response,
+                });
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
@@ -391,13 +460,6 @@ impl BhumiCore {
 }
 
 impl LLMResponse {
-    fn from_gemini(response: GeminiResponse) -> Self {
-        LLMResponse {
-            text: response.get_text(),
-            raw_response: serde_json::to_string(&response).unwrap_or_default(),
-        }
-    }
-
     fn from_openai(response: OpenAIResponse) -> Self {
         LLMResponse {
             text: response.get_text(),
@@ -442,6 +504,13 @@ async fn process_request(
     api_key: &str,
     debug: bool,
 ) -> Result<reqwest::Response, reqwest::Error> {
+    if url.is_empty() {
+        // Create an error by making a request to an invalid URL and wrap in Err
+        return Err(reqwest::get("http://invalid-url")
+            .await
+            .expect_err("Expected error for invalid URL"));
+    }
+
     retry_with_backoff(
         || async {
             client
@@ -452,8 +521,8 @@ async fn process_request(
                 .send()
                 .await
         },
-        3, // max retries
-        100, // initial delay in ms
+        3,
+        100,
     )
     .await
 }

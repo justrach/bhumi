@@ -1,92 +1,90 @@
-from ..base import BaseLLM, LLMConfig
-import httpx
+from ..base_client import BaseLLMClient, LLMConfig
 from typing import Dict, Any, AsyncIterator, List
 import json
 import asyncio
 
-class AnthropicLLM(BaseLLM):
-    """Anthropic implementation of BaseLLM"""
+class AnthropicLLM:
+    """Anthropic implementation using BaseLLMClient"""
     
-    def _setup_client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            timeout=httpx.Timeout(self.config.timeout),
-            headers=self._prepare_headers()
-        )
-    
-    def _prepare_headers(self) -> Dict[str, str]:
-        headers = {
-            "content-type": "application/json",
-            "x-api-key": self.config.api_key,
-            "anthropic-version": "2023-06-01"
-        }
-        if self.config.headers:
-            # Don't allow overriding anthropic-version
-            headers.update({k:v for k,v in self.config.headers.items() if k != "anthropic-version"})
-        return headers
-    
-    def _prepare_request(self, messages: List[Dict[str, str]], **kwargs) -> Dict[str, Any]:
-        # Convert OpenAI-style messages to Anthropic format
-        system = next((msg["content"] for msg in messages if msg["role"] == "system"), None)
-        messages = [msg for msg in messages if msg["role"] != "system"]
+    def __init__(self, config: LLMConfig):
+        self.config = config
+        if not config.base_url:
+            config.base_url = "https://api.anthropic.com/v1/messages"  # Use messages endpoint
+        self.client = BaseLLMClient(config)
+        
+    async def completion(self, messages: List[Dict[str, str]], stream: bool = False, **kwargs) -> Any:
+        # Extract actual model name if it contains provider prefix
+        model = self.config.model.split('/')[-1] if '/' in self.config.model else self.config.model
         
         request = {
-            "model": self.config.model_name,
-            "messages": [
-                {
-                    "role": "assistant" if msg["role"] == "assistant" else "user",
-                    "content": msg["content"]
-                }
-                for msg in messages
-            ],
-            "max_tokens": kwargs.get("max_tokens", 1024)
+            "_headers": {
+                "x-api-key": self.config.api_key,
+                "anthropic-version": self.config.api_version or "2023-06-01",
+                "content-type": "application/json"
+            },
+            "model": model,
+            "messages": messages,
+            "max_tokens": kwargs.pop("max_tokens", 1024),
+            "stream": stream,
+            **kwargs
         }
         
-        if system:
-            request["system"] = system
-            
-        # Add Anthropic-specific parameters
-        if "temperature" in kwargs:
-            request["temperature"] = kwargs["temperature"]
-        if "top_p" in kwargs:
-            request["top_p"] = kwargs["top_p"]
-            
-        return request
-    
-    async def _make_request(self, request: Dict[str, Any]) -> httpx.Response:
-        url = f"{self.config.base_url}/messages"
-        response = await self.client.post(url, json=request)
-        response.raise_for_status()
+        if self.config.debug:
+            print(f"Sending Anthropic request: {json.dumps(request, indent=2)}")
+        
+        if stream:
+            return self._stream_completion(request)
+        
+        response = await self.client.completion(request)
+        # Parse Anthropic's response format
+        if isinstance(response, dict):
+            try:
+                if "content" in response:
+                    return {
+                        "text": response["content"][0]["text"],
+                        "raw_response": response
+                    }
+                elif "error" in response:
+                    return {
+                        "text": f"Error: {response['error'].get('message', 'Unknown error')}",
+                        "raw_response": response
+                    }
+            except Exception as e:
+                if self.config.debug:
+                    print(f"Error parsing response: {e}")
         return response
     
-    async def _make_streaming_request(self, request: Dict[str, Any]) -> httpx.Response:
-        request = request.copy()
-        request["stream"] = True
-        return await self._make_request(request)
+    def _convert_messages_to_prompt(self, messages: List[Dict[str, str]]) -> str:
+        """Convert OpenAI-style messages to Anthropic prompt format"""
+        prompt = ""
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            
+            if role == "system":
+                prompt += f"\n\nHuman: System instruction: {content}\n\nAssistant: I understand."
+            elif role == "user":
+                prompt += f"\n\nHuman: {content}"
+            elif role == "assistant":
+                prompt += f"\n\nAssistant: {content}"
+        
+        # Add final Human/Assistant marker for response
+        if not prompt.endswith("Assistant:"):
+            prompt += "\n\nAssistant:"
+        
+        return prompt.lstrip()
     
-    async def _process_response(self, response: httpx.Response) -> Dict[str, Any]:
-        data = response.json()
-        return {
-            "text": data["content"][0]["text"],
-            "raw_response": data
-        }
-    
-    async def _process_stream(self, response: httpx.Response) -> AsyncIterator[str]:
-        async for line in response.aiter_lines():
-            if line.startswith("event: "):
-                event_type = line.removeprefix("event: ").strip()
-                continue
-                
-            if line.startswith("data: "):
-                try:
-                    data = json.loads(line.removeprefix("data: "))
-                    
-                    if data["type"] == "content_block_delta":
-                        if text := data["delta"].get("text", ""):
-                            # Add small delay to make streaming visible
-                            await asyncio.sleep(0.05)  # 50ms delay
-                            yield text
-                            
-                except json.JSONDecodeError:
-                    if self.config.debug:
-                        print(f"Failed to decode chunk: {line}")
-                    continue 
+    async def _stream_completion(self, request: Dict[str, Any]) -> AsyncIterator[str]:
+        """Handle streaming responses"""
+        async for chunk in await self.client.completion(request, stream=True):
+            try:
+                if isinstance(chunk, str):
+                    data = json.loads(chunk)
+                    if "content" in data and data["content"]:
+                        yield data["content"][0]["text"]
+                    elif "error" in data:
+                        yield f"Error: {data['error'].get('message', 'Unknown error')}"
+                else:
+                    yield chunk
+            except:
+                yield chunk 
