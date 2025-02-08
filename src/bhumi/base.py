@@ -7,14 +7,52 @@ from .utils import async_retry
 class LLMConfig:
     """Configuration for LLM providers"""
     api_key: str
-    base_url: str
-    model: str
+    model: str  # Format: "provider/model_name" e.g. "gemini/gemini-pro" or "openai/gpt-4"
     api_version: Optional[str] = None
     organization: Optional[str] = None
     max_retries: int = 3
     timeout: float = 30.0
     headers: Optional[Dict[str, str]] = None
     debug: bool = False
+
+    @property
+    def provider(self) -> str:
+        """Extract provider from model string"""
+        if "/" in self.model:
+            return self.model.split("/")[0]
+        # Default to OpenAI if no provider specified
+        return "openai"
+    
+    @property
+    def model_name(self) -> str:
+        """Extract actual model name from model string"""
+        if "/" in self.model:
+            return self.model.split("/")[1]
+        return self.model
+    
+    @property
+    def base_url(self) -> str:
+        """Get base URL based on provider"""
+        if self.provider == "gemini":
+            return "https://generativelanguage.googleapis.com/v1/models"
+        elif self.provider == "anthropic":
+            return "https://api.anthropic.com/v1"
+        elif self.provider == "openai":
+            return "https://api.openai.com/v1"
+        # Add more providers as needed
+        return "https://api.openai.com/v1"  # Default to OpenAI
+
+def create_llm(config: LLMConfig) -> 'BaseLLM':
+    """Factory function to create appropriate LLM client"""
+    if config.provider == "gemini":
+        from .providers.gemini_client import GeminiLLM
+        return GeminiLLM(config)
+    elif config.provider == "anthropic":
+        from .providers.anthropic_client import AnthropicLLM
+        return AnthropicLLM(config)
+    else:
+        from .providers.openai_client import OpenAILLM
+        return OpenAILLM(config)
 
 class BaseLLM(ABC):
     """Base class for LLM providers following OpenAI-like interface"""
