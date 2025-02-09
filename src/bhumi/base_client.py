@@ -109,10 +109,24 @@ class BaseLLMClient:
             if response := self.core._get_response():
                 try:
                     response_data = json.loads(response)
-                    return {
-                        "text": response_data["choices"][0]["message"]["content"],
-                        "raw_response": response_data
-                    }
+                    # Handle Gemini's response format
+                    if "candidates" in response_data:
+                        return {
+                            "text": response_data["candidates"][0]["content"]["parts"][0]["text"],
+                            "raw_response": response_data
+                        }
+                    # Handle OpenAI/other formats
+                    elif "choices" in response_data:
+                        return {
+                            "text": response_data["choices"][0]["message"]["content"],
+                            "raw_response": response_data
+                        }
+                    # Fallback for other response formats
+                    else:
+                        return {
+                            "text": response,
+                            "raw_response": {"text": response}
+                        }
                 except Exception as e:
                     if self.debug:
                         print(f"Error parsing response: {e}")

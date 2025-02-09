@@ -179,9 +179,45 @@ impl BhumiCore {
 
                                         let model_name = model.split('/').last().unwrap_or(&model);
                                         
-                                        // Use different endpoint for streaming
-                                        let is_streaming = request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false);
-                                        let url = if is_streaming {
+                                        let prompt = request_json
+                                            .get("messages")
+                                            .and_then(|m| m.as_array())
+                                            .and_then(|m| m.first())
+                                            .and_then(|m| m.get("content"))
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or_default();
+
+                                        // Build Gemini request with optional search tool
+                                        let mut request_body = serde_json::json!({
+                                            "contents": [{
+                                                "parts": [{
+                                                    "text": prompt
+                                                }],
+                                                "role": "user"
+                                            }]
+                                        });
+
+                                        // Add search tool if requested
+                                        if request_json.get("use_search").and_then(|s| s.as_bool()).unwrap_or(false) {
+                                            let tools = serde_json::json!([{
+                                                "google_search_retrieval": {
+                                                    "dynamic_retrieval_config": {
+                                                        "mode": "MODE_DYNAMIC",
+                                                        "dynamic_threshold": 1
+                                                    }
+                                                }
+                                            }]);
+                                            
+                                            request_body.as_object_mut().map(|obj| {
+                                                obj.insert("tools".to_string(), tools);
+                                            });
+                                        }
+
+                                        if debug {
+                                            println!("Worker {}: Final request body: {:?}", worker_id, request_body);
+                                        }
+
+                                        let url = if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
                                             format!(
                                                 "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
                                                 model_name,
@@ -197,27 +233,6 @@ impl BhumiCore {
 
                                         if debug {
                                             println!("Worker {}: Sending request to API: {}", worker_id, url);
-                                        }
-
-                                        let prompt = request_json
-                                            .get("messages")
-                                            .and_then(|m| m.as_array())
-                                            .and_then(|m| m.first())
-                                            .and_then(|m| m.get("content"))
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or_default();
-
-                                        let request_body = serde_json::json!({
-                                            "contents": [{
-                                                "parts": [{
-                                                    "text": prompt
-                                                }],
-                                                "role": "user"
-                                            }]
-                                        });
-
-                                        if debug {
-                                            println!("Worker {}: Final request body: {:?}", worker_id, request_body);
                                         }
 
                                         client.post(&url)
