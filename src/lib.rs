@@ -174,21 +174,51 @@ impl BhumiCore {
                                     "gemini" => {
                                         if debug {
                                             println!("Worker {}: Processing Gemini request", worker_id);
+                                            println!("Worker {}: Request body: {:?}", worker_id, request_json);
                                         }
 
-                                        let url = format!(
-                                            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-                                            model,
-                                            api_key.trim_start_matches("Bearer ")
-                                        );
+                                        let model_name = model.split('/').last().unwrap_or(&model);
+                                        
+                                        // Use different endpoint for streaming
+                                        let is_streaming = request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false);
+                                        let url = if is_streaming {
+                                            format!(
+                                                "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
+                                                model_name,
+                                                api_key.trim_start_matches("Bearer ")
+                                            )
+                                        } else {
+                                            format!(
+                                                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                                                model_name,
+                                                api_key.trim_start_matches("Bearer ")
+                                            )
+                                        };
 
                                         if debug {
                                             println!("Worker {}: Sending request to API: {}", worker_id, url);
                                         }
 
-                                        // Remove _headers from request before sending
-                                        let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                        let prompt = request_json
+                                            .get("messages")
+                                            .and_then(|m| m.as_array())
+                                            .and_then(|m| m.first())
+                                            .and_then(|m| m.get("content"))
+                                            .and_then(|c| c.as_str())
+                                            .unwrap_or_default();
+
+                                        let request_body = serde_json::json!({
+                                            "contents": [{
+                                                "parts": [{
+                                                    "text": prompt
+                                                }],
+                                                "role": "user"
+                                            }]
+                                        });
+
+                                        if debug {
+                                            println!("Worker {}: Final request body: {:?}", worker_id, request_body);
+                                        }
 
                                         client.post(&url)
                                             .header("Content-Type", "application/json")
@@ -256,6 +286,35 @@ impl BhumiCore {
                                                                         let data = line.trim_start_matches("data: ");
                                                                         let mut chunks = stream_chunks.lock().unwrap();
                                                                         chunks.push_back(data.to_string());
+                                                                    }
+                                                                } else if provider == "gemini" {
+                                                                    if line.starts_with("data: ") {
+                                                                        let data = line.trim_start_matches("data: ");
+                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
+                                                                            if let Some(text) = json
+                                                                                .get("candidates")
+                                                                                .and_then(|c| c.get(0))
+                                                                                .and_then(|c| c.get("content"))
+                                                                                .and_then(|c| c.get("parts"))
+                                                                                .and_then(|p| p.get(0))
+                                                                                .and_then(|p| p.get("text"))
+                                                                                .and_then(|t| t.as_str())
+                                                                            {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back(text.to_string());
+                                                                            }
+                                                                            if json
+                                                                                .get("candidates")
+                                                                                .and_then(|c| c.get(0))
+                                                                                .and_then(|c| c.get("finishReason"))
+                                                                                .and_then(|f| f.as_str())
+                                                                                == Some("STOP") 
+                                                                            {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back("[DONE]".to_string());
+                                                                                break;
+                                                                            }
+                                                                        }
                                                                     }
                                                                 } else {
                                                                     // Original handling for other providers
