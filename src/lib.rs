@@ -42,6 +42,7 @@ struct BhumiCore {
     provider: String,  // "anthropic", "gemini", "openai", "groq", or "sambanova"
     stream_chunks: Arc<Mutex<VecDeque<String>>>,
     base_url: Option<String>,  // Change to Option<String>
+    max_tokens: Option<i32>,  // Add max_tokens field
 }
 
 #[pymethods]
@@ -273,7 +274,17 @@ impl BhumiCore {
 
                                         // Remove _headers from request before sending
                                         let mut request_body = request_json.clone();
-                                        request_body.as_object_mut().map(|obj| obj.remove("_headers"));
+                                        request_body.as_object_mut().map(|obj| {
+                                            obj.remove("_headers");  // Remove internal headers
+                                            
+                                            // Keep max_tokens if it exists and is not null
+                                            if let Some(max_tokens) = obj.get("max_tokens") {
+                                                if !max_tokens.is_null() {
+                                                    // Keep max_tokens in the request
+                                                    obj.insert("max_tokens".to_string(), max_tokens.clone());
+                                                }
+                                            }
+                                        });
 
                                         client.post(&url)
                                             .headers(headers)
@@ -413,6 +424,7 @@ impl BhumiCore {
             provider,
             stream_chunks,
             base_url: Some(base_url),  // Store as Option
+            max_tokens: None,  // Initialize as None
         })
     }
 
@@ -458,7 +470,8 @@ impl BhumiCore {
             },
             "model": model,
             "messages": messages_json,
-            "stream": false
+            "stream": false,
+            "max_tokens": self.max_tokens  // Use the struct field instead of config
         });
 
         self.submit(request.to_string())?;

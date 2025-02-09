@@ -18,6 +18,8 @@ class LLMConfig:
     timeout: float = 30.0
     headers: Optional[Dict[str, str]] = None
     debug: bool = False
+    max_tokens: Optional[int] = None  # Add max_tokens parameter
+    extra_config: Dict[str, Any] = None
 
     def __post_init__(self):
         # Extract provider from model if not provided
@@ -32,6 +34,10 @@ class LLMConfig:
                 self.base_url = "https://api.anthropic.com/v1"
             elif self.provider == "gemini":
                 self.base_url = "https://generativelanguage.googleapis.com/v1/models"
+            elif self.provider == "sambanova":
+                self.base_url = "https://api.sambanova.ai/v1"
+            elif self.provider == "groq":
+                self.base_url = "https://api.groq.com/openai/v1"
             else:
                 self.base_url = "https://api.openai.com/v1"  # Default to OpenAI
 
