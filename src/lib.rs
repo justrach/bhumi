@@ -302,42 +302,91 @@ impl BhumiCore {
                                     Ok(resp) => {
                                         if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
                                             let stream = resp.bytes_stream();
-                                            process_response(stream, response_tx.clone(), buffer_size).await;
-                                        } else {
-                                            let stream = resp.bytes_stream();
-                                            let mut buffer: Vec<u8> = Vec::with_capacity(32768);
-                                            let mut chunk_sizes = Vec::new();
-                                            
                                             tokio::pin!(stream);
+                                            
                                             while let Some(chunk_result) = stream.next().await {
                                                 if let Ok(bytes) = chunk_result {
-                                                    chunk_sizes.push(bytes.len());  // Record chunk size
-                                                    buffer.extend_from_slice(&bytes);
-                                                    
-                                                    if buffer.len() >= 32768 {
-                                                        if let Ok(text) = String::from_utf8(buffer.clone()) {
-                                                            let stats = serde_json::json!({
-                                                                "text": text,
-                                                                "chunk_sizes": chunk_sizes.clone()
-                                                            }).to_string();
-                                                            println!("Debug - Sending response: {}", stats);  // Debug print
-                                                            response_tx.try_send(stats).ok();
+                                                    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
+                                                        for line in text.lines() {
+                                                            if !line.is_empty() {
+                                                                if provider == "anthropic" {
+                                                                    // For Anthropic, forward the SSE data directly
+                                                                    if line.starts_with("data: ") {
+                                                                        let mut chunks = stream_chunks.lock().unwrap();
+                                                                        chunks.push_back(line.trim_start_matches("data: ").to_string());
+                                                                    }
+                                                                } else if provider == "gemini" {
+                                                                    if line.starts_with("data: ") {
+                                                                        let data = line.trim_start_matches("data: ");
+                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
+                                                                            if let Some(text) = json
+                                                                                .get("candidates")
+                                                                                .and_then(|c| c.get(0))
+                                                                                .and_then(|c| c.get("content"))
+                                                                                .and_then(|c| c.get("parts"))
+                                                                                .and_then(|p| p.get(0))
+                                                                                .and_then(|p| p.get("text"))
+                                                                                .and_then(|t| t.as_str())
+                                                                            {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back(text.to_string());
+                                                                            }
+                                                                            if json
+                                                                                .get("candidates")
+                                                                                .and_then(|c| c.get(0))
+                                                                                .and_then(|c| c.get("finishReason"))
+                                                                                .and_then(|f| f.as_str())
+                                                                                == Some("STOP") 
+                                                                            {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back("[DONE]".to_string());
+                                                                                break;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                } else {
+                                                                    // For OpenAI and others
+                                                                    if line.starts_with("data: ") {
+                                                                        let data = line.trim_start_matches("data: ");
+                                                                        if data == "[DONE]" {
+                                                                            let mut chunks = stream_chunks.lock().unwrap();
+                                                                            chunks.push_back("[DONE]".to_string());
+                                                                            break;
+                                                                        }
+                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
+                                                                            if let Some(content) = json
+                                                                                .get("choices")
+                                                                                .and_then(|c| c.get(0))
+                                                                                .and_then(|c| c.get("delta"))
+                                                                                .and_then(|d| d.get("content"))
+                                                                                .and_then(|c| c.as_str()) 
+                                                                            {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back(content.to_string());
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
                                                         }
-                                                        buffer.clear();
-                                                        chunk_sizes.clear();
                                                     }
                                                 }
                                             }
+                                        } else {
+                                            // For non-streaming responses, buffer the entire response
+                                            let mut buffer = Vec::with_capacity(32768);
+                                            let stream = resp.bytes_stream();
+                                            tokio::pin!(stream);
                                             
-                                            // Send final buffer with stats
-                                            if !buffer.is_empty() {
-                                                if let Ok(text) = String::from_utf8(buffer) {
-                                                    let stats = serde_json::json!({
-                                                        "text": text,
-                                                        "chunk_sizes": chunk_sizes
-                                                    });
-                                                    println!("Debug - Sending response: {}", stats);  // Debug print
-                                                    let _ = response_tx.try_send(stats.to_string()).ok();
+                                            while let Some(chunk_result) = stream.next().await {
+                                                if let Ok(bytes) = chunk_result {
+                                                    buffer.extend_from_slice(&bytes);
+                                                }
+                                            }
+                                            
+                                            if let Ok(text) = String::from_utf8(buffer) {
+                                                if serde_json::from_str::<Value>(&text).is_ok() {
+                                                    response_tx.try_send(text).ok();
                                                 }
                                             }
                                         }
