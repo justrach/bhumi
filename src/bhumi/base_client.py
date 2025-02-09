@@ -20,6 +20,7 @@ class LLMConfig:
     debug: bool = False
     max_tokens: Optional[int] = None  # Add max_tokens parameter
     extra_config: Dict[str, Any] = None
+    buffer_size: int = 131072  # Back to 128KB for optimal performance
 
     def __post_init__(self):
         # Extract provider from model if not provided
@@ -56,7 +57,8 @@ class BaseLLMClient:
             provider=config.provider or "generic",
             model=config.model,
             debug=debug,
-            base_url=config.base_url
+            base_url=config.base_url,
+            buffer_size=config.buffer_size,  # Pass buffer_size to Rust
         )
         self.debug = debug
     

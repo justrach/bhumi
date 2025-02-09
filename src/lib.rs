@@ -10,6 +10,7 @@ use tokio::time::sleep;
 use std::time::Duration;
 use std::future::Future;
 use reqwest::header::{HeaderMap, HeaderValue};
+use bytes;
 
 mod anthropic;
 mod gemini;
@@ -43,6 +44,7 @@ struct BhumiCore {
     stream_chunks: Arc<Mutex<VecDeque<String>>>,
     base_url: Option<String>,  // Change to Option<String>
     max_tokens: Option<i32>,  // Add max_tokens field
+    buffer_size: usize,
 }
 
 #[pymethods]
@@ -55,7 +57,8 @@ impl BhumiCore {
         use_grounding=false,
         debug=false,
         stream_buffer_size=1000,
-        base_url=None
+        base_url=None,
+        buffer_size=131072  // Back to 128KB for optimal performance
     ))]
     fn new(
         max_concurrent: usize,
@@ -65,6 +68,7 @@ impl BhumiCore {
         debug: bool,
         stream_buffer_size: usize,
         base_url: Option<&str>,
+        buffer_size: usize,
     ) -> PyResult<Self> {
         let (request_tx, request_rx) = mpsc::channel::<String>(100_000);
         let (response_tx, response_rx) = mpsc::channel::<String>(100_000);
@@ -136,7 +140,7 @@ impl BhumiCore {
                 if debug {
                     println!("Starting worker {}", worker_id);
                 }
-                let mut buffer = Vec::with_capacity(32768);
+                let mut buffer: Vec<u8> = Vec::with_capacity(32768);
                 loop {
                     let request = {
                         let mut rx = request_rx.lock().await;
@@ -296,87 +300,44 @@ impl BhumiCore {
 
                                 let _response: Result<(), reqwest::Error> = match response {
                                     Ok(resp) => {
-                                        buffer.clear();
-                                        let stream = resp.bytes_stream();
-                                        
-                                        tokio::pin!(stream);
-                                        while let Some(chunk_result) = stream.next().await {
-                                            if let Ok(bytes) = chunk_result {
-                                                if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
-                                                    if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                                                        for line in text.lines() {
-                                                            if !line.is_empty() {
-                                                                if provider == "anthropic" {
-                                                                    // For Anthropic, forward the SSE data directly
-                                                                    if line.starts_with("data: ") {
-                                                                        let data = line.trim_start_matches("data: ");
-                                                                        let mut chunks = stream_chunks.lock().unwrap();
-                                                                        chunks.push_back(data.to_string());
-                                                                    }
-                                                                } else if provider == "gemini" {
-                                                                    if line.starts_with("data: ") {
-                                                                        let data = line.trim_start_matches("data: ");
-                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
-                                                                            if let Some(text) = json
-                                                                                .get("candidates")
-                                                                                .and_then(|c| c.get(0))
-                                                                                .and_then(|c| c.get("content"))
-                                                                                .and_then(|c| c.get("parts"))
-                                                                                .and_then(|p| p.get(0))
-                                                                                .and_then(|p| p.get("text"))
-                                                                                .and_then(|t| t.as_str())
-                                                                            {
-                                                                                let mut chunks = stream_chunks.lock().unwrap();
-                                                                                chunks.push_back(text.to_string());
-                                                                            }
-                                                                            if json
-                                                                                .get("candidates")
-                                                                                .and_then(|c| c.get(0))
-                                                                                .and_then(|c| c.get("finishReason"))
-                                                                                .and_then(|f| f.as_str())
-                                                                                == Some("STOP") 
-                                                                            {
-                                                                                let mut chunks = stream_chunks.lock().unwrap();
-                                                                                chunks.push_back("[DONE]".to_string());
-                                                                                break;
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                } else {
-                                                                    // Original handling for other providers
-                                                                    if line.starts_with("data: ") {
-                                                                        let data = line.trim_start_matches("data: ");
-                                                                        if data == "[DONE]" {
-                                                                            let mut chunks = stream_chunks.lock().unwrap();
-                                                                            chunks.push_back("[DONE]".to_string());
-                                                                            break;
-                                                                        }
-                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
-                                                                            if let Some(content) = json
-                                                                                .get("choices")
-                                                                                .and_then(|c| c.get(0))
-                                                                                .and_then(|c| c.get("delta"))
-                                                                                .and_then(|d| d.get("content"))
-                                                                                .and_then(|c| c.as_str()) 
-                                                                            {
-                                                                                let mut chunks = stream_chunks.lock().unwrap();
-                                                                                chunks.push_back(content.to_string());
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                } else {
-                                                    // Non-streaming response handling
+                                        if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
+                                            let stream = resp.bytes_stream();
+                                            process_response(stream, response_tx.clone(), buffer_size).await;
+                                        } else {
+                                            let stream = resp.bytes_stream();
+                                            let mut buffer: Vec<u8> = Vec::with_capacity(32768);
+                                            let mut chunk_sizes = Vec::new();
+                                            
+                                            tokio::pin!(stream);
+                                            while let Some(chunk_result) = stream.next().await {
+                                                if let Ok(bytes) = chunk_result {
+                                                    chunk_sizes.push(bytes.len());  // Record chunk size
                                                     buffer.extend_from_slice(&bytes);
-                                                    if let Ok(text) = String::from_utf8(buffer.clone()) {
-                                                        if serde_json::from_str::<Value>(&text).is_ok() {
-                                                            response_tx.try_send(text).ok();
-                                                            break;
+                                                    
+                                                    if buffer.len() >= 32768 {
+                                                        if let Ok(text) = String::from_utf8(buffer.clone()) {
+                                                            let stats = serde_json::json!({
+                                                                "text": text,
+                                                                "chunk_sizes": chunk_sizes.clone()
+                                                            }).to_string();
+                                                            println!("Debug - Sending response: {}", stats);  // Debug print
+                                                            response_tx.try_send(stats).ok();
                                                         }
+                                                        buffer.clear();
+                                                        chunk_sizes.clear();
                                                     }
+                                                }
+                                            }
+                                            
+                                            // Send final buffer with stats
+                                            if !buffer.is_empty() {
+                                                if let Ok(text) = String::from_utf8(buffer) {
+                                                    let stats = serde_json::json!({
+                                                        "text": text,
+                                                        "chunk_sizes": chunk_sizes
+                                                    });
+                                                    println!("Debug - Sending response: {}", stats);  // Debug print
+                                                    let _ = response_tx.try_send(stats.to_string()).ok();
                                                 }
                                             }
                                         }
@@ -425,6 +386,7 @@ impl BhumiCore {
             stream_chunks,
             base_url: Some(base_url),  // Store as Option
             max_tokens: None,  // Initialize as None
+            buffer_size,
         })
     }
 
@@ -544,6 +506,28 @@ impl BhumiCore {
             }
         }
     }
+
+    // Make extract_text accessible from Python
+    #[pyo3(name = "_extract_text_rust")]
+    fn py_extract_text(&self, response: String) -> PyResult<String> {
+        let parsed: Value = serde_json::from_str(&response)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        
+        let text = match self.provider.as_str() {
+            "gemini" => parsed["candidates"][0]["content"]["parts"][0]["text"]
+                .as_str()
+                .map(|s| s.to_string()),
+            "openai" | "groq" => parsed["choices"][0]["message"]["content"]
+                .as_str()
+                .map(|s| s.to_string()),
+            "anthropic" => parsed["content"][0]["text"]
+                .as_str()
+                .map(|s| s.to_string()),
+            _ => None
+        };
+
+        Ok(text.unwrap_or(response))
+    }
 }
 
 impl LLMResponse {
@@ -589,7 +573,7 @@ async fn process_request(
     url: &str,
     request_json: &Value,
     api_key: &str,
-    debug: bool,
+    _debug: bool,
 ) -> Result<reqwest::Response, reqwest::Error> {
     if url.is_empty() {
         // Create an error by making a request to an invalid URL and wrap in Err
@@ -612,6 +596,47 @@ async fn process_request(
         100,
     )
     .await
+}
+
+async fn process_response(
+    mut stream: impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+    response_tx: mpsc::Sender<String>,
+    buffer_size: usize,
+) {
+    let mut buffer: Vec<u8> = Vec::with_capacity(buffer_size);
+    let mut chunk_sizes = Vec::new();  // Track chunk sizes
+    
+    while let Some(chunk_result) = stream.next().await {
+        if let Ok(bytes) = chunk_result {
+            chunk_sizes.push(bytes.len());  // Record chunk size
+            buffer.extend_from_slice(&bytes);
+            
+            if buffer.len() >= buffer_size {
+                if let Ok(text) = String::from_utf8(buffer.clone()) {
+                    // Send chunk statistics along with the text
+                    let stats = serde_json::json!({
+                        "text": text,
+                        "chunk_sizes": chunk_sizes
+                    }).to_string();
+                    println!("Debug - Sending response: {}", stats);  // Debug print
+                    let _ = response_tx.try_send(stats.to_string()).ok();
+                }
+                buffer.clear();
+                chunk_sizes.clear();
+            }
+        }
+    }
+    
+    if !buffer.is_empty() {
+        if let Ok(text) = String::from_utf8(buffer) {
+            let stats = serde_json::json!({
+                "text": text,
+                "chunk_sizes": chunk_sizes
+            });
+            println!("Debug - Sending response: {}", stats);  // Debug print
+            let _ = response_tx.try_send(stats.to_string()).ok();
+        }
+    }
 }
 
 #[pymodule]

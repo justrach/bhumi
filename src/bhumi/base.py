@@ -15,6 +15,9 @@ class LLMConfig:
     timeout: float = 30.0
     headers: Optional[Dict[str, str]] = None
     debug: bool = False
+    max_tokens: Optional[int] = None
+    extra_config: Dict[str, Any] = None
+    buffer_size: int = 16384  # Added buffer size parameter with 16KB default
 
     def __post_init__(self):
         """Set up provider-specific configuration after initialization"""
@@ -147,3 +150,20 @@ class BaseLLM(ABC):
     async def _make_streaming_request(self, request: Dict[str, Any]) -> Any:
         """Make a streaming API request"""
         pass 
+
+    def __init__(
+        self,
+        config: LLMConfig,
+        max_concurrent: int = 10,
+        debug: bool = False
+    ):
+        self.config = config
+        self.core = _rust.BhumiCore(
+            max_concurrent=max_concurrent,
+            provider=config.provider or "generic",
+            model=config.model,
+            debug=debug,
+            base_url=config.base_url,
+            buffer_size=config.buffer_size,  # Pass buffer_size to Rust
+        )
+        self.debug = debug 
