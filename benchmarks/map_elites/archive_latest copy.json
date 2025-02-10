@@ -1,0 +1,1512 @@
+{
+  "resolution": 5,
+  "archive": {
+    "(1, 3, 0)": {
+      "config": {
+        "buffer_size": 1372,
+        "min_buffer": 1449,
+        "max_buffer": 9664,
+        "adjustment_factor": 1.4812240042460587,
+        "max_concurrent": 5,
+        "batch_size": 3,
+        "max_retries": 1,
+        "retry_delay": 0.5838084221389667,
+        "timeout": 29.464162918338385,
+        "keepalive_timeout": 49.13659415522415
+      },
+      "performance": 518.9692389467259
+    },
+    "(0, 3, 0)": {
+      "config": {
+        "buffer_size": 2139,
+        "min_buffer": 970,
+        "max_buffer": 8985,
+        "adjustment_factor": 1.2559852819821655,
+        "max_concurrent": 3,
+        "batch_size": 2,
+        "max_retries": 1,
+        "retry_delay": 0.5357263465378302,
+        "timeout": 24.289872781010477,
+        "keepalive_timeout": 55.723597099801026
+      },
+      "performance": 508.9497129396719
+    },
+    "(0, 4, 0)": {
+      "config": {
+        "buffer_size": 1089,
+        "min_buffer": 880,
+        "max_buffer": 12462,
+        "adjustment_factor": 1.1306540127200067,
+        "max_concurrent": 4,
+        "batch_size": 3,
+        "max_retries": 1,
+        "retry_delay": 0.5134787030376993,
+        "timeout": 25.250608631166667,
+        "keepalive_timeout": 65.91936237560259
+      },
+      "performance": 459.6725371974335
+    },
+    "(1, 4, 0)": {
+      "config": {
+        "buffer_size": 1313,
+        "min_buffer": 1232,
+        "max_buffer": 10099,
+        "adjustment_factor": 1.2651820146392414,
+        "max_concurrent": 5,
+        "batch_size": 3,
+        "max_retries": 1,
+        "retry_delay": 0.5722462886776277,
+        "timeout": 28.62397665110213,
+        "keepalive_timeout": 59.84960300691948
+      },
+      "performance": 478.40507985365645
+    }
+  },
+  "history": [
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 335.0074680570203,
+      "metrics": {
+        "throughput": 335.0074680570203,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3572.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1073.2222222222222
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 371.89477398023973,
+      "metrics": {
+        "throughput": 371.89477398023973,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3787,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1057.357142857143
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 376.158580116973,
+      "metrics": {
+        "throughput": 376.158580116973,
+        "error_rate": 0.0,
+        "concurrent_requests": 1,
+        "avg_response_size": 3803.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1058.2857142857142
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 441.79344567077123,
+      "metrics": {
+        "throughput": 441.79344567077123,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 4535.666666666667,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 1083.3333333333333
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 317.4624297911062,
+      "metrics": {
+        "throughput": 317.4624297911062,
+        "error_rate": 0.0,
+        "concurrent_requests": 2,
+        "avg_response_size": 3634.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1021.4761904761905
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 393.38435024462444,
+      "metrics": {
+        "throughput": 393.38435024462444,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3385.6666666666665,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1048.7222222222222
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 284.5842063198961,
+      "metrics": {
+        "throughput": 284.5842063198961,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3704.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1097.7222222222222
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 308.7111024596362,
+      "metrics": {
+        "throughput": 308.7111024596362,
+        "error_rate": 0.0,
+        "concurrent_requests": 1,
+        "avg_response_size": 4013,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1064.8809523809523
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 346.68728906803625,
+      "metrics": {
+        "throughput": 346.68728906803625,
+        "error_rate": 0.0,
+        "concurrent_requests": 1,
+        "avg_response_size": 3718.3333333333335,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1030.9761904761904
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 407.5198293144784,
+      "metrics": {
+        "throughput": 407.5198293144784,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3935.3333333333335,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1093.095238095238
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 417.7030691062785,
+      "metrics": {
+        "throughput": 417.7030691062785,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3256.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 932.8333333333334
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 371.9217550539625,
+      "metrics": {
+        "throughput": 371.9217550539625,
+        "error_rate": 0.0,
+        "concurrent_requests": 1,
+        "avg_response_size": 4494.666666666667,
+        "avg_chunks": 4,
+        "avg_chunk_size": 1033.7777777777778
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 366.5550038114675,
+      "metrics": {
+        "throughput": 366.5550038114675,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3733.3333333333335,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1037.9285714285713
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 415.18981777780175,
+      "metrics": {
+        "throughput": 415.18981777780175,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3581.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1046.2222222222222
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 355.2031184024912,
+      "metrics": {
+        "throughput": 355.2031184024912,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3812,
+        "avg_chunks": 4,
+        "avg_chunk_size": 874.0972222222222
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 423.1471373256182,
+      "metrics": {
+        "throughput": 423.1471373256182,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 4447.666666666667,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 1066.4166666666667
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 439.27762000250726,
+      "metrics": {
+        "throughput": 439.27762000250726,
+        "error_rate": 0.0,
+        "concurrent_requests": 1,
+        "avg_response_size": 4022.6666666666665,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 921.6190476190476
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 413.4296059841458,
+      "metrics": {
+        "throughput": 413.4296059841458,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3350.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1016.8333333333334
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 334.3874289823145,
+      "metrics": {
+        "throughput": 334.3874289823145,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3164.6666666666665,
+        "avg_chunks": 2.6666666666666665,
+        "avg_chunk_size": 1072.5666666666666
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 304.9948698184309,
+      "metrics": {
+        "throughput": 304.9948698184309,
+        "error_rate": 0.0,
+        "concurrent_requests": 1,
+        "avg_response_size": 3897,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1067.8095238095239
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 326.799508460523,
+      "metrics": {
+        "throughput": 326.799508460523,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3944.3333333333335,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1037.952380952381
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 462.7934229206497,
+      "metrics": {
+        "throughput": 462.7934229206497,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3744.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1032.1904761904761
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 314.8645212331737,
+      "metrics": {
+        "throughput": 314.8645212331737,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3714.6666666666665,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 974
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 442.2886050362749,
+      "metrics": {
+        "throughput": 442.2886050362749,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3811,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1018.8333333333334
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 308.2012335087652,
+      "metrics": {
+        "throughput": 308.2012335087652,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3695.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1102.5555555555557
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 432.3595366922434,
+      "metrics": {
+        "throughput": 432.3595366922434,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 4044.3333333333335,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1070.2380952380952
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 450.40300249549153,
+      "metrics": {
+        "throughput": 450.40300249549153,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3216.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 996.8333333333334
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 352.3133139545523,
+      "metrics": {
+        "throughput": 352.3133139545523,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 4128.666666666667,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1106.9761904761904
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 349.33028118081006,
+      "metrics": {
+        "throughput": 349.33028118081006,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3267.6666666666665,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1006.1666666666666
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 342.1171103038529,
+      "metrics": {
+        "throughput": 342.1171103038529,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 4106.666666666667,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1077.5
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 435.567284539655,
+      "metrics": {
+        "throughput": 435.567284539655,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3352.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1020.8888888888889
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 363.30806909123254,
+      "metrics": {
+        "throughput": 363.30806909123254,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3959,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1060.0238095238096
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 439.5259950181761,
+      "metrics": {
+        "throughput": 439.5259950181761,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3920.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1070.452380952381
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 254.48532066971634,
+      "metrics": {
+        "throughput": 254.48532066971634,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3452.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1040.0555555555557
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 302.28655344496616,
+      "metrics": {
+        "throughput": 302.28655344496616,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 4421,
+        "avg_chunks": 4,
+        "avg_chunk_size": 957.1111111111111
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 310.40013406068624,
+      "metrics": {
+        "throughput": 310.40013406068624,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 4038,
+        "avg_chunks": 4,
+        "avg_chunk_size": 880.125
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 341.395622106338,
+      "metrics": {
+        "throughput": 341.395622106338,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3516.3333333333335,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 986.9285714285714
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 412.8018781310724,
+      "metrics": {
+        "throughput": 412.8018781310724,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3654.3333333333335,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 863.3571428571429
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 316.4135542797585,
+      "metrics": {
+        "throughput": 316.4135542797585,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 4003,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1049.9761904761904
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        4,
+        0
+      ],
+      "performance": 478.40507985365645,
+      "metrics": {
+        "throughput": 478.40507985365645,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 4103.333333333333,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1086.9761904761904
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 268.375020151311,
+      "metrics": {
+        "throughput": 268.375020151311,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3192,
+        "avg_chunks": 2.6666666666666665,
+        "avg_chunk_size": 1079.1333333333334
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 419.36612640939023,
+      "metrics": {
+        "throughput": 419.36612640939023,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3597,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1085.5
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 397.0633246951188,
+      "metrics": {
+        "throughput": 397.0633246951188,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3977.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1086.1190476190477
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 336.07554839109855,
+      "metrics": {
+        "throughput": 336.07554839109855,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3886,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 918.2619047619047
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        4,
+        0
+      ],
+      "performance": 369.97774700676945,
+      "metrics": {
+        "throughput": 369.97774700676945,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 4104.666666666667,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1085.595238095238
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 476.3659298894168,
+      "metrics": {
+        "throughput": 476.3659298894168,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3711.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1004.7142857142857
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 454.06383085427046,
+      "metrics": {
+        "throughput": 454.06383085427046,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3369.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 966.452380952381
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 508.9497129396719,
+      "metrics": {
+        "throughput": 508.9497129396719,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3355.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1015.3888888888889
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 324.7505233402376,
+      "metrics": {
+        "throughput": 324.7505233402376,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 4666.666666666667,
+        "avg_chunks": 4,
+        "avg_chunk_size": 1048.9259259259259
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 369.29541108636573,
+      "metrics": {
+        "throughput": 369.29541108636573,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3531.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1061.5555555555557
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 422.09140617539083,
+      "metrics": {
+        "throughput": 422.09140617539083,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3427.6666666666665,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1056.0555555555557
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 413.173673582932,
+      "metrics": {
+        "throughput": 413.173673582932,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3899.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1082.1904761904761
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 398.6586682120341,
+      "metrics": {
+        "throughput": 398.6586682120341,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3904.6666666666665,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 933.7936507936508
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 457.7529383701629,
+      "metrics": {
+        "throughput": 457.7529383701629,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3564.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1082.5
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 348.0195911825925,
+      "metrics": {
+        "throughput": 348.0195911825925,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3499,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1058.6666666666667
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 222.44536957045972,
+      "metrics": {
+        "throughput": 222.44536957045972,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3547.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1051.4444444444443
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 320.3806197106164,
+      "metrics": {
+        "throughput": 320.3806197106164,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3855.3333333333335,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 1005.3333333333334
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 428.5178668861351,
+      "metrics": {
+        "throughput": 428.5178668861351,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3354,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 879.1111111111111
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 382.9539189935909,
+      "metrics": {
+        "throughput": 382.9539189935909,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3582,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1072.5555555555557
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 350.5094897128693,
+      "metrics": {
+        "throughput": 350.5094897128693,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3619,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1074.2777777777778
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 412.1245846808099,
+      "metrics": {
+        "throughput": 412.1245846808099,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 4039.6666666666665,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 997.375
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 378.05614391356926,
+      "metrics": {
+        "throughput": 378.05614391356926,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3069.6666666666665,
+        "avg_chunks": 2.6666666666666665,
+        "avg_chunk_size": 1064.9
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 455.2154628735197,
+      "metrics": {
+        "throughput": 455.2154628735197,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3346.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1023.5
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 483.78220325747833,
+      "metrics": {
+        "throughput": 483.78220325747833,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3650.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 984.3095238095237
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 302.98179022471453,
+      "metrics": {
+        "throughput": 302.98179022471453,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3438.3333333333335,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1065.9444444444443
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 380.689075042026,
+      "metrics": {
+        "throughput": 380.689075042026,
+        "error_rate": 0.0,
+        "concurrent_requests": 2,
+        "avg_response_size": 3427.1666666666665,
+        "avg_chunks": 3.1666666666666665,
+        "avg_chunk_size": 1005.3412698412699
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 412.0390828288277,
+      "metrics": {
+        "throughput": 412.0390828288277,
+        "error_rate": 0.0,
+        "concurrent_requests": 2,
+        "avg_response_size": 3882,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1048.7619047619048
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 453.90033663202826,
+      "metrics": {
+        "throughput": 453.90033663202826,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3959,
+        "avg_chunks": 3.5,
+        "avg_chunk_size": 983.25
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 447.64625780482703,
+      "metrics": {
+        "throughput": 447.64625780482703,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3969.8333333333335,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1074.547619047619
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 458.0172581197473,
+      "metrics": {
+        "throughput": 458.0172581197473,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3457.3333333333335,
+        "avg_chunks": 3.1666666666666665,
+        "avg_chunk_size": 1026.031746031746
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 481.0980370094534,
+      "metrics": {
+        "throughput": 481.0980370094534,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3745,
+        "avg_chunks": 3.1666666666666665,
+        "avg_chunk_size": 1061.7777777777778
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        1,
+        4,
+        0
+      ],
+      "performance": 218.36509431818791,
+      "metrics": {
+        "throughput": 218.36509431818791,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 4072,
+        "avg_chunks": 3.5,
+        "avg_chunk_size": 1050.919642857143
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 405.5096191726079,
+      "metrics": {
+        "throughput": 405.5096191726079,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3892.6666666666665,
+        "avg_chunks": 3.5,
+        "avg_chunk_size": 988.0
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 329.6952316663143,
+      "metrics": {
+        "throughput": 329.6952316663143,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 4076,
+        "avg_chunks": 3.6666666666666665,
+        "avg_chunk_size": 984.9494047619048
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 338.3138174171769,
+      "metrics": {
+        "throughput": 338.3138174171769,
+        "error_rate": 0.0,
+        "concurrent_requests": 3,
+        "avg_response_size": 3533.5,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1070.9166666666667
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 356.2405292867951,
+      "metrics": {
+        "throughput": 356.2405292867951,
+        "error_rate": 0.0,
+        "concurrent_requests": 2,
+        "avg_response_size": 3822.1666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1039.8472222222222
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 486.85016225607046,
+      "metrics": {
+        "throughput": 486.85016225607046,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3794.6666666666665,
+        "avg_chunks": 3.5,
+        "avg_chunk_size": 1014.1994047619048
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        4,
+        0
+      ],
+      "performance": 459.6725371974335,
+      "metrics": {
+        "throughput": 459.6725371974335,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 4028.5,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1067.345238095238
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        1,
+        3,
+        0
+      ],
+      "performance": 518.9692389467259,
+      "metrics": {
+        "throughput": 518.9692389467259,
+        "error_rate": 0.0,
+        "concurrent_requests": 5,
+        "avg_response_size": 3503.5,
+        "avg_chunks": 3.1666666666666665,
+        "avg_chunk_size": 980.9722222222222
+      },
+      "improved": true
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 409.1534342089355,
+      "metrics": {
+        "throughput": 409.1534342089355,
+        "error_rate": 0.0,
+        "concurrent_requests": 2,
+        "avg_response_size": 3591.5,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1074.9444444444443
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 286.25677757052597,
+      "metrics": {
+        "throughput": 286.25677757052597,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3343,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1020.1111111111111
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 431.1870737749443,
+      "metrics": {
+        "throughput": 431.1870737749443,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3161,
+        "avg_chunks": 2.8333333333333335,
+        "avg_chunk_size": 1021.4833333333333
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 441.8105540704351,
+      "metrics": {
+        "throughput": 441.8105540704351,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3773.6666666666665,
+        "avg_chunks": 3.3333333333333335,
+        "avg_chunk_size": 1036.3680555555557
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 316.40613772813316,
+      "metrics": {
+        "throughput": 316.40613772813316,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3882.3333333333335,
+        "avg_chunks": 3.5,
+        "avg_chunk_size": 1025.642857142857
+      },
+      "improved": false
+    },
+    {
+      "behavior": [
+        0,
+        3,
+        0
+      ],
+      "performance": 497.2419945444328,
+      "metrics": {
+        "throughput": 497.2419945444328,
+        "error_rate": 0.0,
+        "concurrent_requests": 4,
+        "avg_response_size": 3721.5,
+        "avg_chunks": 3,
+        "avg_chunk_size": 1100.361111111111
+      },
+      "improved": false
+    }
+  ]
+}

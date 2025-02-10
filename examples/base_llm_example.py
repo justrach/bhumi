@@ -1,7 +1,11 @@
 import asyncio
 from bhumi.base_client import BaseLLMClient, LLMConfig
-import os 
-api_key = os.environ("GROQ")
+import os
+import dotenv
+
+dotenv.load_dotenv()
+
+api_key = os.getenv("GROQ_API_KEY")
 async def main():
     # Configure for Groq
     config = LLMConfig(

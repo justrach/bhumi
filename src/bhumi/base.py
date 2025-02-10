@@ -7,14 +7,62 @@ from .utils import async_retry
 class LLMConfig:
     """Configuration for LLM providers"""
     api_key: str
-    base_url: str
-    model: str
+    model: str  # Format: "provider/model_name" e.g. "gemini/gemini-pro" or "openai/gpt-4"
+    base_url: Optional[str] = None  # Now optional, will be set in __post_init__
     api_version: Optional[str] = None
     organization: Optional[str] = None
     max_retries: int = 3
     timeout: float = 30.0
     headers: Optional[Dict[str, str]] = None
     debug: bool = False
+    max_tokens: Optional[int] = None
+    extra_config: Dict[str, Any] = None
+    buffer_size: int = 16384  # Added buffer size parameter with 16KB default
+
+    def __post_init__(self):
+        """Set up provider-specific configuration after initialization"""
+        provider = self.provider
+        
+        # Set default base URLs based on provider
+        if not self.base_url:
+            if provider == "openai":
+                self.base_url = "https://api.openai.com/v1"
+            elif provider == "anthropic":
+                self.base_url = "https://api.anthropic.com/v1"
+            elif provider == "gemini":
+                self.base_url = "https://generativelanguage.googleapis.com/v1/models"
+        
+        # Set provider-specific headers
+        self.headers = self.headers or {}
+        if provider == "openai":
+            self.headers["Authorization"] = f"Bearer {self.api_key}"
+        elif provider == "anthropic":
+            self.headers["x-api-key"] = self.api_key
+            self.headers["anthropic-version"] = self.api_version or "2023-06-01"
+        elif provider == "gemini":
+            self.headers["x-goog-api-key"] = self.api_key
+
+    @property
+    def provider(self) -> str:
+        """Extract provider from model string"""
+        return self.model.split("/")[0]
+
+    @property
+    def model_name(self) -> str:
+        """Extract model name from model string"""
+        return self.model.split("/")[1]
+
+def create_llm(config: LLMConfig) -> 'BaseLLM':
+    """Factory function to create appropriate LLM client"""
+    if config.provider == "gemini":
+        from .providers.gemini_client import GeminiLLM
+        return GeminiLLM(config)
+    elif config.provider == "anthropic":
+        from .providers.anthropic_client import AnthropicLLM
+        return AnthropicLLM(config)
+    else:
+        from .providers.openai_client import OpenAILLM
+        return OpenAILLM(config)
 
 class BaseLLM(ABC):
     """Base class for LLM providers following OpenAI-like interface"""
@@ -102,3 +150,20 @@ class BaseLLM(ABC):
     async def _make_streaming_request(self, request: Dict[str, Any]) -> Any:
         """Make a streaming API request"""
         pass 
+
+    def __init__(
+        self,
+        config: LLMConfig,
+        max_concurrent: int = 10,
+        debug: bool = False
+    ):
+        self.config = config
+        self.core = _rust.BhumiCore(
+            max_concurrent=max_concurrent,
+            provider=config.provider or "generic",
+            model=config.model,
+            debug=debug,
+            base_url=config.base_url,
+            buffer_size=config.buffer_size,  # Pass buffer_size to Rust
+        )
+        self.debug = debug 
