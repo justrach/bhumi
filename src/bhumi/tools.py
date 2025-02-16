@@ -90,15 +90,19 @@ class ToolRegistry:
         if not func:
             raise ValueError(f"Tool {tool_call.function['name']} not found")
             
-        # Parse arguments from JSON string if it's a string
-        args = (json.loads(tool_call.function["arguments"]) 
-                if isinstance(tool_call.function["arguments"], str)
-                else tool_call.function["arguments"])
+        # Handle different argument formats
+        args = tool_call.function["arguments"]
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                # Gemini might return arguments as a plain string for parameterless functions
+                args = {}
         
         if debug:
             print(f"Tool arguments: {json.dumps(args, indent=2)}")
         
-        # Execute the tool (handle both sync and async functions)
+        # Execute the tool
         if callable(func):
             if asyncio.iscoroutinefunction(func):
                 result = await func(**args)

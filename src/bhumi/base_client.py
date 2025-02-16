@@ -39,7 +39,7 @@ class LLMConfig:
             elif self.provider == "anthropic":
                 self.base_url = "https://api.anthropic.com/v1"
             elif self.provider == "gemini":
-                self.base_url = "https://generativelanguage.googleapis.com/v1/models"
+                self.base_url = "https://generativelanguage.googleapis.com/v1beta"
             elif self.provider == "sambanova":
                 self.base_url = "https://api.sambanova.ai/v1"
             elif self.provider == "groq":
@@ -240,6 +240,61 @@ class BaseLLMClient:
             **kwargs
         }
         
+        # Handle Gemini-specific formatting
+        if self.config.provider == "gemini":
+            model_name = model.split('/')[-1]
+            endpoint = f"{self.config.base_url}/models/{model_name}:generateContent"
+            request["_endpoint"] = endpoint
+            
+            # Convert messages to Gemini format
+            gemini_request = {
+                "contents": [{
+                    "role": "user",
+                    "parts": [{
+                        "text": messages[-1]["content"]
+                    }]
+                }]
+            }
+            
+            # Add system instruction if present
+            if len(messages) > 1 and messages[0]["role"] == "system":
+                gemini_request["contents"].insert(0, {
+                    "role": "system",
+                    "parts": [{
+                        "text": messages[0]["content"]
+                    }]
+                })
+            
+            # Add tools if registered
+            if self.tool_registry.get_definitions():
+                tools = [tool.__dict__ for tool in self.tool_registry.get_definitions()]
+                gemini_request["tools"] = {
+                    "function_declarations": [
+                        {
+                            "name": tool["function"]["name"],
+                            "description": tool["function"]["description"],
+                            "parameters": tool["function"]["parameters"]
+                        } for tool in tools
+                    ]
+                }
+                
+                # Add tool config
+                gemini_request["tool_config"] = {
+                    "function_calling_config": {"mode": "auto"}
+                }
+            
+            # Replace request with Gemini format
+            request = {
+                "_headers": {
+                    "Authorization": f"Bearer {self.config.api_key}"
+                },
+                "_endpoint": endpoint,
+                **gemini_request
+            }
+            
+            if debug:
+                print(f"\nGemini request: {json.dumps(request, indent=2)}")
+        
         if debug:
             print(f"\nSending request: {json.dumps(request, indent=2)}")
         
@@ -272,6 +327,106 @@ class BaseLLMClient:
                         request["messages"] = messages
                         self.core._submit(json.dumps(request))
                         continue
+                    
+                    # For Gemini responses
+                    if self.config.provider == "gemini":
+                        if "candidates" in response_data:
+                            candidate = response_data["candidates"][0]
+                            
+                            # Check for function calls
+                            if "functionCall" in candidate:
+                                if debug:
+                                    print("\nFound function call in Gemini response")
+                                
+                                function_call = candidate["functionCall"]
+                                tool_calls = [{
+                                    "id": str(uuid.uuid4()),
+                                    "type": "function",
+                                    "function": {
+                                        "name": function_call["name"],
+                                        "arguments": function_call["args"]
+                                    }
+                                }]
+                                
+                                # Handle tool calls and update messages
+                                messages = await self._handle_tool_calls(messages, tool_calls, debug)
+                                
+                                # Continue conversation with tool results
+                                if debug:
+                                    print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
+                                
+                                # Make a new request with the updated messages
+                                request["contents"][-1]["parts"][0]["text"] = messages[-1]["content"]
+                                self.core._submit(json.dumps(request))
+                                continue
+                            
+                            # Handle regular response
+                            text = candidate.get("content", {}).get("parts", [{}])[0].get("text", "")
+                            return {
+                                "text": text or str(response_data),
+                                "raw_response": response_data
+                            }
+                    
+                    # Handle reasoning-based models (o1-mini, deepseek-r1-distill)
+                    if "reasoning" in response_data.get("choices", [{}])[0].get("message", {}):
+                        message = response_data["choices"][0]["message"]
+                        content = message.get("content", "")
+                        
+                        # Extract function call if present
+                        function_json = None
+                        
+                        # Try different function call formats
+                        if "<function-call>" in content:
+                            start = content.find("<function-call>") + len("<function-call>")
+                            end = content.find("</function-call>")
+                            function_json = content[start:end].strip()
+                        elif "```json" in content:
+                            start = content.find("```json") + len("```json")
+                            end = content.find("```", start)
+                            function_json = content[start:end].strip()
+                        elif "<response>" in content:
+                            start = content.find("<response>") + len("<response>")
+                            end = content.find("</response>")
+                            function_json = content[start:end].strip()
+                        
+                        if function_json:
+                            if debug:
+                                print("\nFound function call in reasoning model response")
+                                print(f"Reasoning: {message.get('reasoning', '')}")
+                            
+                            try:
+                                function_data = json.loads(function_json)
+                                tool_calls = [{
+                                    "id": str(uuid.uuid4()),
+                                    "type": "function",
+                                    "function": {
+                                        "name": function_data["name"],
+                                        "arguments": json.dumps(function_data["arguments"])
+                                    }
+                                }]
+                                
+                                # Handle tool calls and update messages
+                                messages = await self._handle_tool_calls(messages, tool_calls, debug)
+                                
+                                # Continue conversation with tool results
+                                if debug:
+                                    print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
+                                
+                                # Make a new request with the updated messages
+                                request["messages"] = messages
+                                self.core._submit(json.dumps(request))
+                                continue
+                                
+                            except json.JSONDecodeError as e:
+                                if debug:
+                                    print(f"Error parsing function call JSON: {e}")
+                        
+                        # If no function call or after handling it
+                        return {
+                            "text": content,
+                            "reasoning": message.get("reasoning", ""),
+                            "raw_response": response_data
+                        }
                     
                     # Handle final response
                     if "choices" in response_data:
