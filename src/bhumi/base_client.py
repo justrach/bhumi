@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Union, AsyncIterator, Any, Callable
+from typing import Optional, Dict, List, Union, AsyncIterator, Any, Callable, Type, get_type_hints
 from .utils import async_retry
 import bhumi.bhumi as _rust
 import json
@@ -10,6 +10,8 @@ import statistics
 from .tools import ToolRegistry, Tool, ToolCall
 import uuid
 import re
+from pydantic import BaseModel, create_model
+import inspect
 
 @dataclass
 class LLMConfig:
@@ -93,6 +95,38 @@ class ReasoningResponse:
         """Default to showing just the output"""
         return self._output
 
+class StructuredOutput:
+    """Handler for structured output from LLM responses"""
+    
+    def __init__(self, output_type: Type[BaseModel]):
+        self.output_type = output_type
+        self._schema = output_type.model_json_schema()
+    
+    def to_tool_schema(self) -> dict:
+        """Convert Pydantic model to function parameters schema"""
+        return {
+            "type": "object",
+            "properties": self._schema.get("properties", {}),
+            "required": self._schema.get("required", []),
+            "additionalProperties": False
+        }
+    
+    def parse_response(self, response: str) -> BaseModel:
+        """Parse LLM response into structured output"""
+        try:
+            # Try parsing as JSON first
+            data = json.loads(response)
+            return self.output_type.model_validate(data)
+        except json.JSONDecodeError:
+            # If not JSON, try to extract structured data from text
+            return self._extract_structured_data(response)
+    
+    def _extract_structured_data(self, text: str) -> BaseModel:
+        """Extract structured data from text response"""
+        # Add extraction logic here
+        # For now, just raise an error
+        raise ValueError("Response is not in structured format")
+
 class BaseLLMClient:
     """Generic client for OpenAI-compatible APIs"""
     
@@ -136,6 +170,7 @@ class BaseLLMClient:
         
         # Add tool registry
         self.tool_registry = ToolRegistry()
+        self.structured_output = None
 
     def register_tool(
         self,
@@ -146,6 +181,25 @@ class BaseLLMClient:
     ) -> None:
         """Register a new tool that can be called by the model"""
         self.tool_registry.register(name, func, description, parameters)
+
+    def set_structured_output(self, model: Type[BaseModel]) -> None:
+        """Set up structured output handling with a Pydantic model"""
+        self.structured_output = StructuredOutput(model)
+        
+        # Register a tool for structured output
+        self.register_tool(
+            name="generate_structured_output",
+            func=self._structured_output_handler,
+            description=f"Generate structured output according to the schema: {model.__doc__}",
+            parameters=self.structured_output.to_tool_schema()
+        )
+    
+    async def _structured_output_handler(self, **kwargs) -> dict:
+        """Handle structured output generation"""
+        try:
+            return self.structured_output.output_type(**kwargs).model_dump()
+        except Exception as e:
+            raise ValueError(f"Failed to create structured output: {e}")
 
     async def _handle_tool_calls(
         self,
