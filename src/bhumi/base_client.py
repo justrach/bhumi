@@ -9,6 +9,7 @@ from .map_elites_buffer import MapElitesBuffer
 import statistics
 from .tools import ToolRegistry, Tool, ToolCall
 import uuid
+import re
 
 @dataclass
 class LLMConfig:
@@ -75,6 +76,22 @@ class DynamicBuffer:
                 int(self.current_size / self.adjustment_factor)
             )
         return self.current_size
+
+@dataclass
+class ReasoningResponse:
+    """Special response class for reasoning models"""
+    _reasoning: str
+    _output: str
+    _raw: dict
+    
+    @property
+    def think(self) -> str:
+        """Get the model's reasoning process"""
+        return self._reasoning
+    
+    def __str__(self) -> str:
+        """Default to showing just the output"""
+        return self._output
 
 class BaseLLMClient:
     """Generic client for OpenAI-compatible APIs"""
@@ -367,35 +384,35 @@ class BaseLLMClient:
                                 "raw_response": response_data
                             }
                     
-                    # Handle reasoning-based models (o1-mini, deepseek-r1-distill)
-                    if "reasoning" in response_data.get("choices", [{}])[0].get("message", {}):
+                    # Handle responses in completion method
+                    if "choices" in response_data:
                         message = response_data["choices"][0]["message"]
                         content = message.get("content", "")
                         
-                        # Extract function call if present
-                        function_json = None
-                        
-                        # Try different function call formats
-                        if "<function-call>" in content:
-                            start = content.find("<function-call>") + len("<function-call>")
-                            end = content.find("</function-call>")
-                            function_json = content[start:end].strip()
-                        elif "```json" in content:
-                            start = content.find("```json") + len("```json")
-                            end = content.find("```", start)
-                            function_json = content[start:end].strip()
-                        elif "<response>" in content:
-                            start = content.find("<response>") + len("<response>")
-                            end = content.find("</response>")
-                            function_json = content[start:end].strip()
-                        
-                        if function_json:
+                        # First check for tool calls
+                        if "tool_calls" in message:
                             if debug:
-                                print("\nFound function call in reasoning model response")
-                                print(f"Reasoning: {message.get('reasoning', '')}")
+                                print("\nFound tool calls in response")
                             
+                            tool_calls = message["tool_calls"]
+                            
+                            # Handle tool calls and update messages
+                            messages = await self._handle_tool_calls(messages, tool_calls, debug)
+                            
+                            # Continue conversation with tool results
+                            if debug:
+                                print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
+                            
+                            # Make a new request with the updated messages
+                            request["messages"] = messages
+                            self.core._submit(json.dumps(request))
+                            continue
+                        
+                        # Extract function call from content if present
+                        function_match = re.search(r'<function-call>(.*?)</function-call>', content, re.DOTALL)
+                        if function_match:
                             try:
-                                function_data = json.loads(function_json)
+                                function_data = json.loads(function_match.group(1).strip())
                                 tool_calls = [{
                                     "id": str(uuid.uuid4()),
                                     "type": "function",
@@ -416,15 +433,29 @@ class BaseLLMClient:
                                 request["messages"] = messages
                                 self.core._submit(json.dumps(request))
                                 continue
-                                
                             except json.JSONDecodeError as e:
                                 if debug:
                                     print(f"Error parsing function call JSON: {e}")
                         
-                        # If no function call or after handling it
+                        # Then check for reasoning format
+                        think_match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
+                        if think_match or message.get("reasoning"):
+                            # Get reasoning either from think tags or reasoning field
+                            reasoning = think_match.group(1).strip() if think_match else message.get("reasoning", "")
+                            
+                            # Get output - either after </think> or full content if no think tags
+                            output = content[content.find("</think>") + 8:].strip() if think_match else content
+                            
+                            # Create ReasoningResponse
+                            return ReasoningResponse(
+                                _reasoning=reasoning,
+                                _output=output,
+                                _raw=response_data
+                            )
+                        
+                        # Regular response if no reasoning found
                         return {
                             "text": content,
-                            "reasoning": message.get("reasoning", ""),
                             "raw_response": response_data
                         }
                     
