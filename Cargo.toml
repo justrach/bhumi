@@ -1,11 +1,42 @@
 [package]
 name = "bhumi"
-version = "0.1.1"
+version = "0.1.0"
+authors = ["Your Name <your.email@example.com>"]
 edition = "2021"
+description = "A high-performance LLM client library with batching capabilities"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/bhumi"
+documentation = "https://docs.rs/bhumi"
+homepage = "https://github.com/yourusername/bhumi"
+keywords = ["llm", "ai", "groq", "batch-processing", "async"]
+categories = ["asynchronous", "api-bindings", "web-programming"]
+readme = "README.md"
+
+# Explicitly include only what we want to publish
+include = [
+    "/src/*.rs",
+    "/src/bhumi/*.py",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE*"
+]
+
+# Everything else is automatically excluded
+exclude = [
+    "**/frontend/**",
+    "**/node_modules/**",
+    "examples/*",
+    "tests/*",
+    ".env",
+    ".gitignore",
+    "media/*",
+    ".github/*",
+    "bhumi/*",
+]
 
 [lib]
 name = "bhumi"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.20", features = ["extension-module"] }
