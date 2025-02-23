@@ -72,6 +72,9 @@ def create_llm(config: LLMConfig) -> 'BaseLLM':
     elif config.provider == "anthropic":
         from .providers.anthropic_client import AnthropicLLM
         return AnthropicLLM(config)
+    elif config.provider == "groq":
+        from .providers.groq_client import GroqLLM
+        return GroqLLM(config)
     else:
         from .providers.openai_client import OpenAILLM
         return OpenAILLM(config)
