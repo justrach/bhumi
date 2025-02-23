@@ -1,3 +1,23 @@
+//! Bhumi is a high-performance LLM client library with batching capabilities.
+//! 
+//! # Features
+//! 
+//! - Async/await support
+//! - Batch processing
+//! - Python bindings
+//! - Multiple LLM provider support
+//! 
+//! # Example
+//! 
+//! ```rust
+//! use bhumi::Client;
+//! 
+//! #[tokio::main]
+//! async fn main() {
+//!     // Example code here
+//! }
+//! ```
+
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::sync::Arc;

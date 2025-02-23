@@ -12,6 +12,8 @@ export default function Home() {
 
         <div className="text-center max-w-4xl mx-auto">
           <Image 
+            width={192}
+            height={192}
             src="https://images.bhumi.trilok.ai/bhumi_logo.png" 
             alt="Bhumi Logo" 
             className="mx-auto mb-8 w-48 h-48 rounded-xl"

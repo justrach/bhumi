@@ -1,14 +1,44 @@
 [package]
 name = "bhumi"
-version = "0.1.1"
+version = "0.1.0"
+authors = ["Your Name <your.email@example.com>"]
 edition = "2021"
+description = "A high-performance LLM client library with batching capabilities"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/bhumi"
+documentation = "https://docs.rs/bhumi"
+homepage = "https://github.com/yourusername/bhumi"
+keywords = ["llm", "ai", "groq", "batch-processing", "async"]
+categories = ["asynchronous", "api-bindings", "web-programming"]
+readme = "README.md"
+
+# Explicitly include only what we want to publish
+include = [
+    "/src/**/*.rs",
+    "/src/bhumi/**/*.py",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE*"
+]
+
+# Everything else is automatically excluded
+exclude = [
+    "**/frontend/**",
+    "**/node_modules/**",
+    "examples/*",
+    "tests/*",
+    ".env",
+    ".gitignore",
+    "media/*",
+    ".github/*",
+]
 
 [lib]
 name = "bhumi"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.20", features = ["extension-module"] }
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py38"] }
 tokio = { version = "1.0", features = ["full"] }
 reqwest = { version = "0.11", features = ["json", "stream"] }
 futures = "0.3"
@@ -17,3 +47,6 @@ bytes = "1.0"
 serde_json = "1.0"
 uuid = { version = "1.0", features = ["v4"] }
 serde = { version = "1.0", features = ["derive"] }
+
+[build-dependencies]
+pyo3-build-config = "0.20"
