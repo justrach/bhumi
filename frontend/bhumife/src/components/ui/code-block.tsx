@@ -1,7 +1,9 @@
+'use client'
+
 import React from 'react'
+import { Copy } from 'lucide-react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
-import { Copy } from 'lucide-react'
 
 interface CodeBlockProps {
   code: string
@@ -19,14 +21,7 @@ export function CodeBlock({ code, language, showLineNumbers = true }: CodeBlockP
   }
 
   return (
-    <div className="relative group rounded-lg overflow-hidden">
-      <button
-        onClick={copyToClipboard}
-        className="absolute right-2 top-2 p-2 rounded-lg bg-gray-800 opacity-0 group-hover:opacity-100 transition-opacity"
-        aria-label="Copy code"
-      >
-        <Copy className={`h-4 w-4 ${copied ? 'text-green-400' : 'text-gray-400'}`} />
-      </button>
+    <div className="relative">
       <SyntaxHighlighter
         language={language}
         style={oneDark}
@@ -34,12 +29,18 @@ export function CodeBlock({ code, language, showLineNumbers = true }: CodeBlockP
         customStyle={{
           margin: 0,
           borderRadius: '0.5rem',
-          fontSize: '0.9rem',
+          padding: '1rem',
         }}
-        wrapLines={true}
       >
-        {code.trim()}
+        {code}
       </SyntaxHighlighter>
+      <button
+        onClick={copyToClipboard}
+        className="absolute top-2 right-2 p-2 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors"
+        aria-label="Copy code"
+      >
+        <Copy className={`h-4 w-4 ${copied ? 'text-green-400' : 'text-gray-400'}`} />
+      </button>
     </div>
   )
 } 
