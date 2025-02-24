@@ -4,7 +4,7 @@ export function Hero() {
 
   return (
     <div className="text-center max-w-4xl mx-auto">
-      <div className="mb-8">
+      <div className="flex flex-col items-center gap-2 mb-8">
         <a 
           href="https://trilok.ai" 
           target="_blank" 
@@ -13,6 +13,16 @@ export function Hero() {
         >
           <span className="mr-2">Part of</span>
           <span className="font-semibold text-[hsl(15,85%,70%)]">Trilok.ai</span>
+          <span className="ml-2">→</span>
+        </a>
+        <a 
+          href="https://rach.codes/blog/Introducing-Bhumi" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="inline-flex items-center px-4 py-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors text-gray-700 text-sm"
+        >
+          <span className="mr-2">Read the</span>
+          <span className="font-semibold text-[hsl(15,85%,70%)]">Technical Writeup</span>
           <span className="ml-2">→</span>
         </a>
       </div>
