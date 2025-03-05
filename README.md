@@ -2,14 +2,14 @@
   <img src="/assets/bhumi_logo.png" alt="Bhumi Logo" width="1600"/>
 </p>
 
-<h1 align="center"><b>Bhumi (भूमि)</b></h1>
+<h1 align="center"><b>Bhumi</b></h1>
 
 # 🌍 **BHUMI - AI Client Setup and Usage Guide** ⚡
 
 ## **Introduction**
-Bhumi (भूमि) is the Sanskrit word for **Earth**, symbolizing **stability, grounding, and speed**. Just as the Earth moves with unwavering momentum, **Bhumi AI ensures that your inference speed is as fast as nature itself!** 🚀 
+Bhumi is a fast, async Python client for LLM APIs, built with Rust for maximum performance. Designed for speed and efficiency, it offers seamless support for multiple AI providers while ensuring reliability through connection pooling, retries, and streaming capabilities.
 
-A fast, async Python client for LLM APIs with Rust under the hood.
+Bhumi (भूमि) is Sanskrit for **Earth**, symbolizing **stability, grounding, and speed**—just like our inference engine, which ensures rapid and stable performance. 🚀
 
 ## Features
 - Async support with Rust-powered concurrency
@@ -67,58 +67,6 @@ async def main():
     config = LLMConfig(
         api_key=api_key,
         model="gemini/gemini-2.0-flash",
-        debug=True
-    )
-    
-    client = BaseLLMClient(config)
-    
-    response = await client.completion([
-        {"role": "user", "content": "Tell me a joke"}
-    ])
-    print(f"Response: {response['text']}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-### Groq Example
-```python
-import asyncio
-from bhumi.base_client import BaseLLMClient, LLMConfig
-import os
-
-api_key = os.getenv("GROQ_API_KEY")
-
-async def main():
-    config = LLMConfig(
-        api_key=api_key,
-        model="groq/llama-3.1-8b-it",
-        debug=True
-    )
-    
-    client = BaseLLMClient(config)
-    
-    response = await client.completion([
-        {"role": "user", "content": "Tell me a joke"}
-    ])
-    print(f"Response: {response['text']}")
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-### SambaNova Example
-```python
-import asyncio
-from bhumi.base_client import BaseLLMClient, LLMConfig
-import os
-
-api_key = os.getenv("SAMBANOVA_API_KEY")
-
-async def main():
-    config = LLMConfig(
-        api_key=api_key,
-        model="sambanova/Meta-Llama-3.3-70B-Instruct",
         debug=True
     )
     
@@ -200,3 +148,4 @@ We welcome contributions from the community! Whether you're an individual develo
 Apache 2.0
 
 🌟 **Join our community and help make AI inference faster for everyone!** 🌟
+
