@@ -5,7 +5,11 @@
 <h1 align="center"><b>Bhumi</b></h1>
 
 # 🌍 **BHUMI - The Fastest AI Inference Client** ⚡
-
+<p align="center">
+  <a href="https://pypi.org/project/bhumi">
+    <img src="https://static.pepy.tech/badge/kew" alt="PyPI Downloads">
+  </a>
+</p>
 ## **Introduction**
 Bhumi is the fastest AI inference client, built with Rust for Python. It is designed to maximize performance, efficiency, and scalability, making it the best choice for LLM API interactions. 
 
