@@ -190,7 +190,25 @@ This example demonstrates registering a `get_weather` tool and how Bhumi handles
 
 ## 📊 **Benchmark Results**
 Our latest benchmarks show significant performance advantages across different metrics:
-![alt text](benchmarks/plots/bhumi_speedup_20250209_223347.png)
+![alt text](gemini_averaged_comparison_20250131_154711.png)
+
+### ⚡ Response Time
+- LiteLLM: 13.79s
+- Native: 5.55s
+- Bhumi: 4.26s
+- Google GenAI: 6.76s
+
+### 🚀 Throughput (Requests/Second)
+- LiteLLM: 3.48
+- Native: 8.65
+- Bhumi: 11.27
+- Google GenAI: 7.10
+
+### 💾 Peak Memory Usage (MB)
+- LiteLLM: 275.9MB
+- Native: 279.6MB
+- Bhumi: 284.3MB
+- Google GenAI: 284.8MB
 
 These benchmarks demonstrate Bhumi's superior performance, particularly in throughput where it can outperform other solutions significantly.
 
