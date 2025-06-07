@@ -64,7 +64,7 @@ export function NavBar() {
           <Button 
             variant="outline"
             size="sm"
-            onClick={() => window.open('https://github.com/trilokai/bhumi', '_blank')} 
+            onClick={() => window.open('https://github.com/justrach/bhumi', '_blank')} 
             aria-label="View source on GitHub"
             className="flex items-center"
           >
