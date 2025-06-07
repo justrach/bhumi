@@ -31,7 +31,7 @@ export default function Home() {
           <Image 
             width={192}
             height={192}
-            src="https://images.bhumi.trilqwaok.ai/bhumi_logo.png" 
+            src="https://images.bhumi.trilok.ai/bhumi_logo.png" 
             alt="Bhumi Logo - A stylized orange and white design representing speed and intelligence" 
             className="mx-auto mb-8 w-48 h-48 rounded-xl"
           />
