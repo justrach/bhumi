@@ -1,39 +1,49 @@
-'use client'
+'use client';
 
-import React from 'react'
-import { CodeBlock } from '@/components/ui/code-block'
-import { Card } from '@/components/ui/card'
-import { Alert } from '@/components/ui/alert'
-import { NavBar } from '@/components/nav-bar'
+import React from 'react';
+import { CodeBlock } from '@/components/ui/code-block';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'; // Assuming Card can take Header/Title/Content
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Assuming Alert can take Title/Description
 
 export function DocumentationContent() {
+  // Helper for consistent section titles
+  const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <h2 className="text-3xl font-semibold pb-3 mb-8 border-b border-gray-200">
+      {children}
+    </h2>
+  );
+
+  // Helper for consistent subsection titles
+  const SubSectionTitle: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className }) => (
+    <h3 className={`text-xl font-medium mb-4 ${className || ''}`}>
+      {children}
+    </h3>
+  );
+
   return (
     <>
-      <NavBar />
-      
-      <div className="max-w-4xl mx-auto py-10 px-4">
-        <header className="mb-12 text-center">
-          <h1 className="text-6xl font-extrabold mb-4 tracking-tight">
-            Bhumi <span className="font-black" style={{ color: "hsl(15, 85%, 70%)" }}>Documentation</span>
-          </h1>
-          <p className="text-xl text-gray-600">
-            Fast, efficient AI inference for your applications
-          </p>
-        </header>
-
-        <section className="mb-12">
-          <h2 className="text-3xl font-semibold mb-6">Quick Start</h2>
-          <Card className="p-6">
-            <h3 className="text-xl font-medium mb-4">Installation</h3>
-            <CodeBlock
-              language="bash"
-              code="pip install bhumi"
-            />
+      {/* NavBar and Header are now handled by the parent page (docs/page.tsx) */}
+      <div className="max-w-4xl mx-auto px-4 space-y-16">
+        {/* Added space-y-16 for consistent vertical spacing between sections */}
+        
+        <section className="pt-8"> {/* pt-8 for initial spacing from page header */}
+          <SectionTitle>Quick Start</SectionTitle>
+          <Card className="overflow-hidden"> {/* Added overflow-hidden for cleaner look with CodeBlock */}
+            <CardHeader>
+              <SubSectionTitle>Installation</SubSectionTitle>
+            </CardHeader>
+            <CardContent>
+              <CodeBlock
+                language="bash"
+                code="pip install bhumi"
+              />
+            </CardContent>
           </Card>
         </section>
 
-        <section className="mb-12">
-          <h2 className="text-3xl font-semibold mb-6">Basic Usage</h2>
+        <section>
+          <SectionTitle>Basic Usage</SectionTitle>
+          {/* Assuming CodeBlock can be placed directly or within a Card if preferred */}
           <CodeBlock
             language="python"
             code={`
@@ -60,9 +70,9 @@ if __name__ == "__main__":
           />
         </section>
 
-        <section className="mb-12">
-          <h2 className="text-3xl font-semibold mb-6">Supported Providers</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <section>
+          <SectionTitle>Supported Providers</SectionTitle>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {[
               { name: 'OpenAI', prefix: 'openai/' },
               { name: 'Anthropic', prefix: 'anthropic/' },
@@ -70,18 +80,26 @@ if __name__ == "__main__":
               { name: 'Groq', prefix: 'groq/' },
               { name: 'SambaNova', prefix: 'sambanova/' },
             ].map((provider) => (
-              <Card key={provider.name} className="p-6 hover:border-[hsl(15,85%,70%)] transition-colors">
-                <h3 className="font-medium">{provider.name}</h3>
-                <code className="text-sm text-[hsl(15,85%,70%)]">{provider.prefix}model_name</code>
+              <Card key={provider.name} className="hover:border-[hsl(15,85%,70%)] transition-colors">
+                <CardHeader>
+                  <CardTitle className="text-lg">{provider.name}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-gray-500 mb-1">Model Prefix:</p>
+                  <code className="text-sm text-[hsl(15,85%,70%)] bg-orange-50 px-2 py-1 rounded-md">{provider.prefix}model_name</code>
+                </CardContent>
               </Card>
             ))}
           </div>
         </section>
 
-        <section className="mb-12">
-          <h2 className="text-3xl font-semibold mb-6">Tool Usage Example</h2>
-          <Alert className="mb-4 border-[hsl(15,85%,70%)] bg-[hsl(15,85%,95%)] text-[hsl(15,85%,30%)]">
-            Bhumi supports external tool integration for enhanced AI capabilities
+        <section>
+          <SectionTitle>Tool Usage Example</SectionTitle>
+          <Alert className="my-6 border-[hsl(15,85%,70%)] bg-[hsl(15,85%,95%)] text-[hsl(15,85%,30%)]">
+            {/* <AlertTitle>Tool Integration</AlertTitle> Optional: if Alert supports it */}
+            <AlertDescription>
+              Bhumi supports external tool integration for enhanced AI capabilities.
+            </AlertDescription>
           </Alert>
           <CodeBlock
             language="python"
@@ -108,39 +126,38 @@ client.register_tool(
           />
         </section>
 
-        <section className="mb-12">
-          <h2 className="text-3xl font-semibold mb-6">Key Features</h2>
+        <section>
+          <SectionTitle>Key Features</SectionTitle>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="p-6 hover:border-[hsl(15,85%,70%)] transition-colors">
-              <h3 className="font-medium mb-2 text-[hsl(15,85%,70%)]">Streaming Responses</h3>
-              <p className="text-gray-600">
-                Get real-time responses as they're generated
-              </p>
-            </Card>
-            <Card className="p-6 hover:border-[hsl(15,85%,70%)] transition-colors">
-              <h3 className="font-medium mb-2 text-[hsl(15,85%,70%)]">Multi-Provider Support</h3>
-              <p className="text-gray-600">
-                Easily switch between different AI providers
-              </p>
-            </Card>
-            <Card className="p-6 hover:border-[hsl(15,85%,70%)] transition-colors">
-              <h3 className="font-medium mb-2 text-[hsl(15,85%,70%)]">Tool Integration</h3>
-              <p className="text-gray-600">
-                Add custom tools for enhanced functionality
-              </p>
-            </Card>
+            {[
+              { title: "Streaming Responses", description: "Get real-time responses as they're generated." },
+              { title: "Multi-Provider Support", description: "Easily switch between different AI providers." },
+              { title: "Tool Integration", description: "Add custom tools for enhanced functionality." },
+            ].map((feature) => (
+              <Card key={feature.title} className="hover:border-[hsl(15,85%,70%)] transition-colors">
+                <CardHeader>
+                  <CardTitle className="text-lg text-[hsl(15,85%,70%)]">{feature.title}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-gray-600 text-sm">{feature.description}</p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </section>
 
-        <section className="mb-12">
-          <h2 className="text-3xl font-semibold mb-6">Streaming Configuration</h2>
-          <Alert className="mb-4 border-[hsl(15,85%,70%)] bg-[hsl(15,85%,95%)] text-[hsl(15,85%,30%)]">
-            Bhumi supports both streaming and non-streaming modes. Streaming provides faster initial responses and real-time updates.
+        <section>
+          <SectionTitle>Streaming Configuration</SectionTitle>
+          <Alert className="my-6 border-[hsl(15,85%,70%)] bg-[hsl(15,85%,95%)] text-[hsl(15,85%,30%)]">
+            {/* <AlertTitle>Streaming Modes</AlertTitle> */}
+            <AlertDescription>
+              Bhumi supports both streaming and non-streaming modes. Streaming provides faster initial responses and real-time updates.
+            </AlertDescription>
           </Alert>
           
-          <div className="space-y-8">
+          <div className="space-y-12"> {/* Increased space-y for better separation */}
             <div>
-              <h3 className="text-xl font-medium mb-4">Streaming Mode (Default)</h3>
+              <SubSectionTitle>Streaming Mode (Default)</SubSectionTitle>
               <CodeBlock
                 language="python"
                 code={`
@@ -174,7 +191,7 @@ if __name__ == "__main__":
             </div>
 
             <div>
-              <h3 className="text-xl font-medium mb-4">Non-Streaming Mode</h3>
+              <SubSectionTitle>Non-Streaming Mode</SubSectionTitle>
               <CodeBlock
                 language="python"
                 code={`
