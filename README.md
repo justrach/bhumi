@@ -2,7 +2,7 @@
   <img src="/assets/bhumi_logo.png" alt="Bhumi Logo" width="1600"/>
 </p>
 
-<h1 align="center"><b>Bhumi</b></h1>
+
 
 # 🌍 **BHUMI - The Fastest AI Inference Client** ⚡
 
