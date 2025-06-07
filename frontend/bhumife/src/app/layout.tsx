@@ -13,25 +13,59 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Bhumi - Fast AI Inference",
-  description: "Bhumi is the fastest and most efficient AI inference client for Python. Built with Rust for blazing speed, it outperforms pure Python implementations with native multiprocessing. Works seamlessly with OpenAI, Anthropic, Gemini, DeepSeek, Groq, and more.",
+  title: "Bhumi भूमि - Blazing-Fast AI Inference Client",
+  description: "Bhumi is the blazing-fast AI inference client for Python. Built with Rust for unmatched performance, supporting OpenAI, Anthropic, Gemini, Groq, and more. Get 3x faster inference with 60% less memory usage.",
+  keywords: [
+    "AI inference",
+    "Python AI client", 
+    "Rust AI library",
+    "OpenAI client",
+    "Anthropic client",
+    "fast AI inference",
+    "machine learning",
+    "artificial intelligence",
+    "Bhumi",
+    "भूमि"
+  ],
+  authors: [{ name: "Trilok.ai", url: "https://trilok.ai" }],
+  creator: "Trilok.ai",
+  publisher: "Trilok.ai",
   openGraph: {
-    title: "Bhumi - Fast AI Inference",
-    description: "The fastest and most efficient AI inference client for Python",
+    type: "website",
+    title: "Bhumi भूमि - Blazing-Fast AI Inference Client",
+    description: "The blazing-fast AI inference client for Python. Built with Rust for 3x faster performance. Unified interface for OpenAI, Anthropic, Gemini, Groq, and more.",
+    url: "https://bhumi.trilok.ai",
+    siteName: "Bhumi",
     images: [
       {
         url: '/api/og',
         width: 1200,
         height: 630,
-        alt: 'Bhumi - Fast AI Inference',
+        alt: 'Bhumi भूमि - Blazing-Fast AI Inference Client for Python',
       },
     ],
+    locale: "en_US",
   },
   twitter: {
     card: 'summary_large_image',
-    title: "Bhumi - Fast AI Inference",
-    description: "The fastest and most efficient AI inference client for Python",
+    title: "Bhumi भूमि - Blazing-Fast AI Inference Client",
+    description: "The blazing-fast AI inference client for Python. Built with Rust for 3x faster performance.",
     images: ['/api/og'],
+    creator: "@trilok_ai",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  verification: {
+    google: undefined, // Add Google Search Console verification if needed
   },
 };
 
@@ -42,8 +76,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <meta name="theme-color" content="hsl(15, 85%, 70%)" />
+        <meta name="msapplication-TileColor" content="hsl(15, 85%, 70%)" />
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="manifest" href="/manifest.json" />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white`}
       >
         {children}
       </body>
