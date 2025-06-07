@@ -12,6 +12,34 @@
 
 # testing
 /coverage
+# Rust
+/target
+**/target/
+Cargo.lock
+Cargo.toml
+*.rs.bk
+*.rlib
+*.d
+*.so
+*.dll
+*.dylib
+*.exe
+*.pdb
+*.profraw
+/.cargo
+/.rustup
+# Rust build artifacts
+*.rmeta
+*.crate
+# Rust coverage
+/coverage/
+# Rust test output
+/test-output
+# Rust IDE files
+/.idea/
+# Rust VSCode files
+/.vscode/
+
 
 # next.js
 /.next/
