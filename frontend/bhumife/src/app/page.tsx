@@ -6,6 +6,7 @@ import { CodeBlock } from "@/components/ui/code-block";
 import Image from "next/image";
 import { CopyInstall } from "@/components/copy-install";
 import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Star, Github, ChevronRight, Code, Zap, Shield } from "lucide-react";
 
 export default function Home() {
@@ -73,6 +74,169 @@ export default function Home() {
               <div className="text-sm text-gray-500">AI Providers</div>
             </div>
           </div>
+        </section>
+
+        {/* Interactive Demo with Tabs */}
+        <section className="max-w-5xl mx-auto mb-24">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold text-gray-900 mb-4">Try Different Providers</h2>
+            <p className="text-lg text-gray-600">Same simple API, multiple AI providers</p>
+          </div>
+
+          <Card className="p-8 border border-orange-100 bg-white shadow-sm">
+            <Tabs defaultValue="openai" className="w-full">
+              <TabsList className="grid w-full grid-cols-4 mb-8 bg-orange-50 border border-orange-100">
+                <TabsTrigger value="openai" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white">
+                  OpenAI
+                </TabsTrigger>
+                <TabsTrigger value="anthropic" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white">
+                  Anthropic
+                </TabsTrigger>
+                <TabsTrigger value="gemini" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white">
+                  Gemini
+                </TabsTrigger>
+                <TabsTrigger value="groq" className="data-[state=active]:bg-orange-500 data-[state=active]:text-white">
+                  Groq
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="openai" className="mt-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+                    <Code className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">OpenAI GPT-4</h3>
+                    <p className="text-sm text-gray-600">Most popular AI model</p>
+                  </div>
+                </div>
+                <CodeBlock
+                  language="python"
+                  code={`from bhumi.base_client import BaseLLMClient, LLMConfig
+import asyncio
+
+async def main():
+    config = LLMConfig(
+        api_key="YOUR_OPENAI_API_KEY", 
+        model="openai/gpt-4o",
+        max_tokens=1000
+    )
+    
+    client = BaseLLMClient(config)
+    
+    response = await client.completion([
+        {"role": "user", "content": "Explain quantum computing"}
+    ])
+    
+    print(response['text'])
+
+asyncio.run(main())`}
+                />
+              </TabsContent>
+
+              <TabsContent value="anthropic" className="mt-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+                    <Code className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Anthropic Claude</h3>
+                    <p className="text-sm text-gray-600">Advanced reasoning capabilities</p>
+                  </div>
+                </div>
+                <CodeBlock
+                  language="python"
+                  code={`from bhumi.base_client import BaseLLMClient, LLMConfig
+import asyncio
+
+async def main():
+    config = LLMConfig(
+        api_key="YOUR_ANTHROPIC_API_KEY", 
+        model="anthropic/claude-3-sonnet-20240229",
+        max_tokens=1000
+    )
+    
+    client = BaseLLMClient(config)
+    
+    response = await client.completion([
+        {"role": "user", "content": "Help me debug this Python code"}
+    ])
+    
+    print(response['text'])
+
+asyncio.run(main())`}
+                />
+              </TabsContent>
+
+              <TabsContent value="gemini" className="mt-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+                    <Code className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Google Gemini</h3>
+                    <p className="text-sm text-gray-600">Multimodal AI by Google</p>
+                  </div>
+                </div>
+                <CodeBlock
+                  language="python"
+                  code={`from bhumi.base_client import BaseLLMClient, LLMConfig
+import asyncio
+
+async def main():
+    config = LLMConfig(
+        api_key="YOUR_GOOGLE_API_KEY", 
+        model="google/gemini-pro",
+        max_tokens=1000
+    )
+    
+    client = BaseLLMClient(config)
+    
+    response = await client.completion([
+        {"role": "user", "content": "Write a Python function to sort a list"}
+    ])
+    
+    print(response['text'])
+
+asyncio.run(main())`}
+                />
+              </TabsContent>
+
+              <TabsContent value="groq" className="mt-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+                    <Code className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Groq LPU</h3>
+                    <p className="text-sm text-gray-600">Lightning-fast inference</p>
+                  </div>
+                </div>
+                <CodeBlock
+                  language="python"
+                  code={`from bhumi.base_client import BaseLLMClient, LLMConfig
+import asyncio
+
+async def main():
+    config = LLMConfig(
+        api_key="YOUR_GROQ_API_KEY", 
+        model="groq/llama2-70b-4096",
+        max_tokens=1000
+    )
+    
+    client = BaseLLMClient(config)
+    
+    response = await client.completion([
+        {"role": "user", "content": "Generate a REST API example"}
+    ])
+    
+    print(response['text'])
+
+asyncio.run(main())`}
+                />
+              </TabsContent>
+            </Tabs>
+          </Card>
         </section>
 
         {/* Quick Start */}
