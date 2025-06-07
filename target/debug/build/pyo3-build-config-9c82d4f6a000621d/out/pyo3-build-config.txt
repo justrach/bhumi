@@ -1,0 +1,10 @@
+implementation=CPython
+version=3.8
+shared=true
+abi3=true
+lib_name=python3.13
+lib_dir=/Users/rachpradhan/.local/share/uv/python/cpython-3.13.2-macos-aarch64-none/lib
+executable=/Users/rachpradhan/.uv_env/base/bin/python
+pointer_width=64
+build_flags=
+suppress_build_script_link_lines=false
