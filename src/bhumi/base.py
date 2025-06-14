@@ -30,7 +30,7 @@ class LLMConfig:
             elif provider == "anthropic":
                 self.base_url = "https://api.anthropic.com/v1"
             elif provider == "gemini":
-                self.base_url = "https://generativelanguage.googleapis.com/v1/models"
+                self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
         
         # Set provider-specific headers
         self.headers = self.headers or {}
@@ -40,7 +40,8 @@ class LLMConfig:
             self.headers["x-api-key"] = self.api_key
             self.headers["anthropic-version"] = self.api_version or "2023-06-01"
         elif provider == "gemini":
-            self.headers["x-goog-api-key"] = self.api_key
+            # Gemini with OpenAI-compatible endpoint uses Bearer token
+            self.headers["Authorization"] = f"Bearer {self.api_key}"
 
     @property
     def provider(self) -> str:
