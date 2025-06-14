@@ -33,7 +33,6 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use bytes;
 
 mod anthropic;
-mod gemini;
 mod openai;
 
 use openai::OpenAIResponse;
@@ -137,7 +136,7 @@ impl BhumiCore {
                 match provider_str {
                     "openai" => "https://api.openai.com/v1".to_string(),
                     "anthropic" => "https://api.anthropic.com/v1".to_string(),
-                    "gemini" => "https://generativelanguage.googleapis.com/v1/models".to_string(),
+                    "gemini" => "https://generativelanguage.googleapis.com/v1beta/openai".to_string(),
                     _ => "".to_string()
                 }
             }
@@ -196,76 +195,6 @@ impl BhumiCore {
                                 }
                                 
                                 let response = match provider.as_str() {
-                                    "gemini" => {
-                                        if debug {
-                                            println!("Worker {}: Processing Gemini request", worker_id);
-                                            println!("Worker {}: Request body: {:?}", worker_id, request_json);
-                                        }
-
-                                        let model_name = model.split('/').last().unwrap_or(&model);
-                                        
-                                        let prompt = request_json
-                                            .get("messages")
-                                            .and_then(|m| m.as_array())
-                                            .and_then(|m| m.first())
-                                            .and_then(|m| m.get("content"))
-                                            .and_then(|c| c.as_str())
-                                            .unwrap_or_default();
-
-                                        // Build Gemini request with optional search tool
-                                        let mut request_body = serde_json::json!({
-                                            "contents": [{
-                                                "parts": [{
-                                                    "text": prompt
-                                                }],
-                                                "role": "user"
-                                            }]
-                                        });
-
-                                        // Add search tool if requested
-                                        if request_json.get("use_search").and_then(|s| s.as_bool()).unwrap_or(false) {
-                                            let tools = serde_json::json!([{
-                                                "google_search_retrieval": {
-                                                    "dynamic_retrieval_config": {
-                                                        "mode": "MODE_DYNAMIC",
-                                                        "dynamic_threshold": 1
-                                                    }
-                                                }
-                                            }]);
-                                            
-                                            request_body.as_object_mut().map(|obj| {
-                                                obj.insert("tools".to_string(), tools);
-                                            });
-                                        }
-
-                                        if debug {
-                                            println!("Worker {}: Final request body: {:?}", worker_id, request_body);
-                                        }
-
-                                        let url = if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
-                                            format!(
-                                                "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse&key={}",
-                                                model_name,
-                                                api_key.trim_start_matches("Bearer ")
-                                            )
-                                        } else {
-                                            format!(
-                                                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-                                                model_name,
-                                                api_key.trim_start_matches("Bearer ")
-                                            )
-                                        };
-
-                                        if debug {
-                                            println!("Worker {}: Sending request to API: {}", worker_id, url);
-                                        }
-
-                                        client.post(&url)
-                                            .header("Content-Type", "application/json")
-                                            .json(&request_body)
-                                            .send()
-                                            .await
-                                    },
                                     _ => {
                                         let url = if provider == "anthropic" {
                                             format!("{}/messages", base_url)
@@ -285,7 +214,7 @@ impl BhumiCore {
                                                 HeaderValue::from_str("2023-06-01").unwrap()
                                             );
                                         } else {
-                                            // For OpenAI, Groq etc.
+                                            // For OpenAI, Groq, Gemini (OpenAI-compatible) etc.
                                             headers.insert(
                                                 reqwest::header::AUTHORIZATION,
                                                 HeaderValue::from_str(api_key).unwrap()
@@ -334,35 +263,6 @@ impl BhumiCore {
                                                                     if line.starts_with("data: ") {
                                                                         let mut chunks = stream_chunks.lock().unwrap();
                                                                         chunks.push_back(line.trim_start_matches("data: ").to_string());
-                                                                    }
-                                                                } else if provider == "gemini" {
-                                                                    if line.starts_with("data: ") {
-                                                                        let data = line.trim_start_matches("data: ");
-                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
-                                                                            if let Some(text) = json
-                                                                                .get("candidates")
-                                                                                .and_then(|c| c.get(0))
-                                                                                .and_then(|c| c.get("content"))
-                                                                                .and_then(|c| c.get("parts"))
-                                                                                .and_then(|p| p.get(0))
-                                                                                .and_then(|p| p.get("text"))
-                                                                                .and_then(|t| t.as_str())
-                                                                            {
-                                                                                let mut chunks = stream_chunks.lock().unwrap();
-                                                                                chunks.push_back(text.to_string());
-                                                                            }
-                                                                            if json
-                                                                                .get("candidates")
-                                                                                .and_then(|c| c.get(0))
-                                                                                .and_then(|c| c.get("finishReason"))
-                                                                                .and_then(|f| f.as_str())
-                                                                                == Some("STOP") 
-                                                                            {
-                                                                                let mut chunks = stream_chunks.lock().unwrap();
-                                                                                chunks.push_back("[DONE]".to_string());
-                                                                                break;
-                                                                            }
-                                                                        }
                                                                     }
                                                                 } else {
                                                                     // For OpenAI and others
@@ -470,7 +370,7 @@ impl BhumiCore {
             match provider {
                 "openai" => "https://api.openai.com/v1",
                 "anthropic" => "https://api.anthropic.com/v1",
-                "gemini" => "https://generativelanguage.googleapis.com/v1/models",
+                "gemini" => "https://generativelanguage.googleapis.com/v1beta/openai",
                 _ => ""
             }
         });
@@ -583,10 +483,7 @@ impl BhumiCore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         
         let text = match self.provider.as_str() {
-            "gemini" => parsed["candidates"][0]["content"]["parts"][0]["text"]
-                .as_str()
-                .map(|s| s.to_string()),
-            "openai" | "groq" => parsed["choices"][0]["message"]["content"]
+            "openai" | "groq" | "gemini" => parsed["choices"][0]["message"]["content"]
                 .as_str()
                 .map(|s| s.to_string()),
             "anthropic" => parsed["content"][0]["text"]

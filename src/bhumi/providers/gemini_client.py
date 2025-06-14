@@ -1,48 +1,53 @@
+from typing import Dict, List, Optional, AsyncGenerator, Union
+from openai import AsyncOpenAI
 from ..base_client import BaseLLMClient, LLMConfig
-from typing import Dict, Any, AsyncIterator, List
-import json
-import asyncio
 
-class GeminiLLM:
-    """Gemini implementation using BaseLLMClient"""
+class GeminiClient:
+    """Client for Gemini's API using OpenAI-compatible endpoints"""
     
-    def __init__(self, config: LLMConfig):
-        self.config = config
-        if not config.base_url:
-            config.base_url = "https://generativelanguage.googleapis.com/v1beta/models"
-        self.client = BaseLLMClient(config)
+    def __init__(self, config: LLMConfig, client: BaseLLMClient):
+        self.api_key = config.api_key
+        self.base_url = config.base_url or "https://generativelanguage.googleapis.com/v1beta/openai/"
+        self.model = config.model.replace("gemini/", "")  # Remove gemini/ prefix if present
+        self._client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url
+        )
         
-    async def completion(self, messages: List[Dict[str, str]], stream: bool = False, **kwargs) -> Any:
-        # Extract actual model name if it contains provider prefix
-        model = self.config.model.split('/')[-1] if '/' in self.config.model else self.config.model
+    async def completion(
+        self,
+        messages: List[Dict[str, str]],
+        stream: bool = False,
+        **kwargs
+    ) -> Union[Dict[str, str], AsyncGenerator[str, None]]:
+        """Send a completion request to Gemini"""
         
-        # Get the prompt from first message
-        prompt = messages[0]["content"] if messages else ""
-        
-        request = {
-            "_headers": {
-                "Authorization": self.config.api_key  # Raw API key
-            },
-            "contents": [{
-                "parts": [{
-                    "text": prompt
-                }],
-                "role": "user"
-            }],
-            "stream": stream,
+        response = await self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            stream=stream,
             **kwargs
-        }
+        )
         
         if stream:
-            return self._stream_completion(request)
-        
-        response = await self.client.completion(request)
-        # Parse response in Python
-        if isinstance(response, str):
-            response = json.loads(response)
-        return response
+            return self._stream_response(response)
+        else:
+            return {
+                "text": response.choices[0].message.content,
+                "raw": response.model_dump()
+            }
     
-    async def _stream_completion(self, request: Dict[str, Any]) -> AsyncIterator[str]:
-        """Handle streaming responses"""
-        async for chunk in await self.client.completion(request, stream=True):
-            yield chunk 
+    async def _stream_response(self, response) -> AsyncGenerator[str, None]:
+        """Handle streaming response"""
+        async for chunk in response:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+
+# Legacy compatibility alias
+class GeminiLLM(GeminiClient):
+    """Legacy alias for GeminiClient for backward compatibility"""
+    
+    def __init__(self, config: LLMConfig):
+        # Initialize with a dummy BaseLLMClient for compatibility
+        super().__init__(config, None)
