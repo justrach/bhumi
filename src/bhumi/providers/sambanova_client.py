@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, AsyncGenerator, Union
-from ..base_client import BaseLLMClient, LLMConfig, LLMResponse
+from ..base_client import BaseLLMClient, LLMConfig
 
 class SambanovaClient:
     """Client for SambaNova's API using OpenAI-compatible endpoints"""
@@ -16,7 +16,7 @@ class SambanovaClient:
         stream: bool = False,
         system_prompt: str = "You are a helpful assistant",
         **kwargs
-    ) -> Union[LLMResponse, AsyncGenerator[str, None]]:
+    ) -> Union[dict, AsyncGenerator[str, None]]:
         """Send a completion request to SambaNova"""
         
         # Add system prompt if not present
