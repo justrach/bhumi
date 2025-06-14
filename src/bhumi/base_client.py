@@ -42,7 +42,7 @@ class LLMConfig:
             elif self.provider == "anthropic":
                 self.base_url = "https://api.anthropic.com/v1"
             elif self.provider == "gemini":
-                self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+                self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
             elif self.provider == "sambanova":
                 self.base_url = "https://api.sambanova.ai/v1"
             elif self.provider == "groq":
