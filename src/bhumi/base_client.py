@@ -47,8 +47,50 @@ class LLMConfig:
                 self.base_url = "https://api.sambanova.ai/v1"
             elif self.provider == "groq":
                 self.base_url = "https://api.groq.com/openai/v1"
+            elif self.provider == "openrouter":
+                self.base_url = "https://openrouter.ai/api/v1"
             else:
                 self.base_url = "https://api.openai.com/v1"  # Default to OpenAI
+
+def parse_streaming_chunk(chunk: str, provider: str) -> str:
+    """Parse streaming response chunk based on provider format"""
+    try:
+        # Handle Server-Sent Events format
+        lines = chunk.strip().split('\n')
+        content_parts = []
+        
+        for line in lines:
+            if line.startswith('data: '):
+                data_str = line[6:]  # Remove 'data: ' prefix
+                if data_str.strip() == '[DONE]':
+                    continue
+                    
+                try:
+                    data = json.loads(data_str)
+                    
+                    # Extract content based on provider format
+                    if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini']:
+                        # OpenAI-compatible format
+                        if 'choices' in data and len(data['choices']) > 0:
+                            delta = data['choices'][0].get('delta', {})
+                            if 'content' in delta and delta['content']:
+                                content_parts.append(delta['content'])
+                    elif provider == 'anthropic':
+                        # Anthropic format (different streaming format)
+                        if 'delta' in data and 'text' in data['delta']:
+                            content_parts.append(data['delta']['text'])
+                except json.JSONDecodeError:
+                    # If not JSON, might be plain text chunk
+                    if data_str.strip():
+                        content_parts.append(data_str)
+            elif line.strip() and not line.startswith(':'):
+                # Plain text line (fallback)
+                content_parts.append(line)
+        
+        return ''.join(content_parts)
+    except Exception:
+        # Fallback: return original chunk
+        return chunk
 
 class DynamicBuffer:
     """Original dynamic buffer implementation"""
@@ -150,7 +192,11 @@ class BaseLLMClient:
         )
         
         # Only initialize buffer strategy for non-streaming requests
+        # Look for MAP-Elites archive in multiple locations
         archive_paths = [
+            # First, look in the installed package data directory
+            os.path.join(os.path.dirname(__file__), "data", "archive_latest.json"),
+            # Then look in development locations
             "src/archive_latest.json",
             "benchmarks/map_elites/archive_latest.json",
             os.path.join(os.path.dirname(__file__), "../archive_latest.json"),
@@ -285,8 +331,20 @@ class BaseLLMClient:
             if debug:
                 print(f"\nRegistered tools: {json.dumps(tools, indent=2)}")
             
-        # Extract model name if it contains provider prefix
-        model = self.config.model.split('/')[-1] if '/' in self.config.model else self.config.model
+        # Extract model name after provider
+        # Foundation model providers (openai, anthropic, gemini) use simple provider/model format
+        # Gateway providers (groq, openrouter, sambanova) may use provider/company/model format
+        if '/' in self.config.model:
+            parts = self.config.model.split('/')
+            if self.config.provider in ['groq', 'openrouter', 'sambanova']:
+                # Gateway providers: keep everything after provider (handles company/model)
+                model = "/".join(parts[1:])
+                pass  # Gateway provider parsing
+            else:
+                # Foundation providers: just take model name after provider
+                model = parts[1]
+        else:
+            model = self.config.model
         
         # Prepare headers based on provider
         if self.config.provider == "anthropic":
@@ -563,7 +621,17 @@ class BaseLLMClient:
         **kwargs
     ) -> AsyncIterator[str]:
         """Stream completion responses"""
-        model = self.config.model.split('/')[-1] if '/' in self.config.model else self.config.model
+        # Extract model name after provider
+        if '/' in self.config.model:
+            parts = self.config.model.split('/')
+            if self.config.provider in ['groq', 'openrouter', 'sambanova']:
+                # Gateway providers: keep everything after provider (handles company/model)
+                model = "/".join(parts[1:])
+            else:
+                # Foundation providers: just take model name after provider
+                model = parts[1]
+        else:
+            model = self.config.model
         
         headers = {
             "x-api-key": self.config.api_key if self.config.provider == "anthropic" else f"Bearer {self.config.api_key}"
@@ -588,11 +656,9 @@ class BaseLLMClient:
             if chunk == "[DONE]":
                 break
             if chunk:
+                # Process any chunk we receive
                 try:
-                    if self.debug:
-                        print(f"Received chunk: {chunk}")
-                        
-                    # First try parsing the chunk as JSON
+                    # Try to parse as JSON first (for proper SSE format)
                     data = json.loads(chunk)
                     
                     # Skip if data is not a dictionary
@@ -617,21 +683,19 @@ class BaseLLMClient:
                             if text:
                                 yield text
                     else:
-                        # Handle OpenAI and other providers
+                        # Handle OpenAI-compatible providers (OpenAI, Groq, OpenRouter, SambaNova)
                         if "choices" in data:
                             choice = data["choices"][0]
                             if "delta" in choice:
                                 delta = choice["delta"]
-                                if "content" in delta:
-                                    if self.debug:
-                                        print(f"Yielding content: {delta['content']}")
+                                if "content" in delta and delta["content"]:
                                     yield delta["content"]
                             
                             # Check for finish reason
                             if choice.get("finish_reason"):
                                 break
                 except json.JSONDecodeError:
-                    # If not valid JSON, try to extract content from raw SSE data
+                    # If not JSON, check for SSE format
                     if chunk.startswith("data: "):
                         data = chunk.removeprefix("data: ")
                         if data != "[DONE]":
@@ -642,11 +706,12 @@ class BaseLLMClient:
                                              .get("delta", {})
                                              .get("content"))
                                     if content:
-                                        if self.debug:
-                                            print(f"Yielding from SSE: {content}")
                                         yield content
                             except json.JSONDecodeError:
-                                if self.debug:
-                                    print(f"Failed to parse SSE data: {data}")
-                                yield data
-            await asyncio.sleep(0.01) 
+                                # Raw SSE data that's not JSON
+                                if data.strip():
+                                    yield data
+                    else:
+                        # Raw text chunk - yield directly (this handles the case we're seeing)
+                        yield chunk
+            await asyncio.sleep(0.01)

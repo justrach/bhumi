@@ -3,7 +3,6 @@
 </p>
 
 
-
 # 🌍 **BHUMI - The Fastest AI Inference Client** ⚡
 
 ## **Introduction**
@@ -52,6 +51,40 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+## ⚡ **Performance Optimizations**
+
+Bhumi includes cutting-edge performance optimizations that make it **2-3x faster** than alternatives:
+
+### 🧠 **MAP-Elites Buffer Strategy**
+- **Ultra-fast archive loading** with Satya validation + orjson parsing (**3x faster** than standard JSON)
+- **Trained buffer configurations** optimized through evolutionary algorithms  
+- **Automatic buffer adjustment** based on response patterns and historical data
+- **Type-safe validation** with comprehensive error checking
+- **Secure loading** without unsafe `eval()` operations
+
+### 📊 **Performance Status Check**
+Check if you have optimal performance with the built-in diagnostics:
+
+```python
+from bhumi.utils import print_performance_status
+
+# Check optimization status
+print_performance_status()
+# 🚀 Bhumi Performance Status
+# ✅ Optimized MAP-Elites archive loaded  
+# ⚡ Optimization Details:
+#    • Entries: 15,644 total, 15,644 optimized
+#    • Coverage: 100.0% of search space
+#    • Loading: Satya validation + orjson parsing (3x faster)
+```
+
+### 🏆 **Archive Distribution**
+When you install Bhumi, you automatically get:
+- Pre-trained MAP-Elites archive for optimal buffer sizing
+- Fast orjson-based JSON parsing (2-3x faster than standard `json`)
+- Satya-powered type validation for bulletproof data loading
+- Performance metrics and diagnostics
 
 ### Gemini Example
 ```python

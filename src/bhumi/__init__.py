@@ -6,9 +6,14 @@ from .client import (
     CompletionResponse
 )
 
+# Export utility functions for checking performance optimization
+from .utils import check_performance_optimization, print_performance_status
+
 __all__ = [
     'GeminiClient',
     'AnthropicClient',
     'OpenAIClient',
-    'CompletionResponse'
+    'CompletionResponse',
+    'check_performance_optimization',
+    'print_performance_status'
 ] 
