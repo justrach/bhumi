@@ -30,7 +30,7 @@ class LLMConfig:
             elif provider == "anthropic":
                 self.base_url = "https://api.anthropic.com/v1"
             elif provider == "gemini":
-                self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+                self.base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
         
         # Set provider-specific headers
         self.headers = self.headers or {}

@@ -1,0 +1,3 @@
+include src/bhumi/data/archive_latest.json
+include README.md
+include LICENSE 

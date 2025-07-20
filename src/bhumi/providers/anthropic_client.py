@@ -13,8 +13,11 @@ class AnthropicLLM:
         self.client = BaseLLMClient(config)
         
     async def completion(self, messages: List[Dict[str, str]], stream: bool = False, **kwargs) -> Any:
-        # Extract actual model name if it contains provider prefix
-        model = self.config.model.split('/')[-1] if '/' in self.config.model else self.config.model
+        # Extract model name after provider - Anthropic is a foundation provider
+        if '/' in self.config.model:
+            model = self.config.model.split('/')[1]
+        else:
+            model = self.config.model
         
         request = {
             "_headers": {

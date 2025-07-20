@@ -101,16 +101,14 @@ class AsyncLLMClient:
             "stream": False
         }
         
-        if self.debug:
-            print("DEBUG: Sending request:", json.dumps(request, indent=2))
+        # Request prepared for streaming
             
         self._client._submit(json.dumps(request))
         
         # Wait for response
         response = await self._response_queue.get()
         
-        if self.debug:
-            print("DEBUG: Got response:", response)
+        # Process the response
             
         return CompletionResponse.from_raw_response(response, provider=provider)
 

@@ -584,7 +584,7 @@ async fn process_response(
                         "text": text,
                         "chunk_sizes": chunk_sizes
                     }).to_string();
-                    println!("Debug - Sending response: {}", stats);  // Debug print
+                    // Send response without debug output
                     let _ = response_tx.try_send(stats.to_string()).ok();
                 }
                 buffer.clear();
@@ -599,7 +599,7 @@ async fn process_response(
                 "text": text,
                 "chunk_sizes": chunk_sizes
             });
-            println!("Debug - Sending response: {}", stats);  // Debug print
+            // Send final response without debug output
             let _ = response_tx.try_send(stats.to_string()).ok();
         }
     }

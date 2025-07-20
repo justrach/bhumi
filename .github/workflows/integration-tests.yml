@@ -1,0 +1,237 @@
+name: 🚀 Bhumi Integration Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run tests daily at 6 AM UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Comma-separated list of providers to test (openai,anthropic,gemini,groq,openrouter,sambanova) or "all"'
+        default: 'all'
+        required: false
+
+jobs:
+  integration-tests:
+    name: 🧪 Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: 📦 Cache Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-deps-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-${{ matrix.python-version }}-
+            
+      - name: 🦀 Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: 🔧 Install Maturin
+        run: pip install maturin
+        
+      - name: 📋 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin
+          # Install in development mode
+          maturin develop
+          
+      - name: 🔍 Verify Installation
+        run: |
+          python -c "import sys; print('Python:', sys.version)"
+          python -c "import bhumi; print('Bhumi installed successfully')"
+          python -c "from bhumi.utils import print_performance_status; print_performance_status()"
+          
+      - name: 🧪 Run Integration Tests
+        env:
+          # API Keys from GitHub Secrets
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
+          
+          # Test Configuration
+          TEST_TIMEOUT: 60
+          TEST_MAX_TOKENS: 100
+          TEST_DEBUG: false
+          
+          # Filter providers if specified
+          TEST_PROVIDERS: ${{ github.event.inputs.providers || 'all' }}
+          
+        run: |
+          cd tests/integration
+          python test_all_providers.py
+          
+      - name: 📊 Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-python-${{ matrix.python-version }}
+          path: |
+            test_results.json
+            *.log
+          retention-days: 30
+          
+      - name: 📈 Generate Test Report
+        if: always()
+        run: |
+          if [ -f test_results.json ]; then
+            echo "## 🧪 Integration Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "### Python ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+            
+            # Parse JSON and create markdown summary
+            python -c "
+            import json
+            
+            try:
+                with open('test_results.json') as f:
+                    data = json.load(f)
+                
+                print(f\"⏱️ **Duration**: {data['duration']:.2f}s\")
+                print(f\"📊 **Results**: {data['passed_tests']}/{data['total_tests']} tests passed\")
+                print(f\"🎯 **Success Rate**: {data['passed_tests']/data['total_tests']*100:.1f}%\")
+                print(f\"⚡ **MAP-Elites**: {'✅ Active' if data['optimization_active'] else '❌ Inactive'}\")
+                print()
+                
+                for provider, info in data['providers'].items():
+                    status = '✅' if info['passed'] == info['total'] else '❌' if info['passed'] == 0 else '⚠️'
+                    print(f\"**{provider.upper()}** {status}: {info['passed']}/{info['total']}\")
+                    
+                    # Show failed tests
+                    failed = [t for t in info['tests'] if not t['success']]
+                    if failed:
+                        for test in failed[:3]:  # Show first 3 failures
+                            print(f\"  - {test['name']} ({test['model']}): {test['message']}\")
+                        if len(failed) > 3:
+                            print(f\"  - ... and {len(failed) - 3} more failures\")
+                    print()
+                    
+            except Exception as e:
+                print(f\"❌ Failed to parse test results: {e}\")
+            " >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ No test results found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  performance-benchmark:
+    name: 📈 Performance Benchmark
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          
+      - name: 🦀 Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        
+      - name: 📋 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin
+          maturin develop
+          
+      - name: 🚀 Performance Benchmark
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python -c "
+          import time
+          import asyncio
+          import sys
+          sys.path.append('src')
+          from bhumi.base_client import BaseLLMClient, LLMConfig
+          from bhumi.utils import check_performance_optimization
+          
+          async def benchmark():
+              # Test MAP-Elites loading speed
+              start = time.perf_counter()
+              optimization = check_performance_optimization()
+              load_time = time.perf_counter() - start
+              
+              print(f'⚡ MAP-Elites Loading: {load_time*1000:.1f}ms')
+              print(f'📊 Optimization: {\"✅ Active\" if optimization[\"optimized\"] else \"❌ Inactive\"}')
+              
+              if optimization['optimized'] and 'archive_path' in optimization:
+                  import os
+                  size = os.path.getsize(optimization['archive_path'])
+                  print(f'📁 Archive Size: {size // 1024}KB')
+              
+          asyncio.run(benchmark())
+          "
+          
+      - name: 💾 Store Performance Data
+        run: |
+          echo "Performance benchmark completed on $(date)" > performance.log
+          echo "See step output for details" >> performance.log
+          
+      - name: 📤 Upload Performance Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-benchmark
+          path: performance.log
+
+  notify-status:
+    name: 📢 Notify Status
+    runs-on: ubuntu-latest
+    needs: [integration-tests, performance-benchmark]
+    if: always()
+    
+    steps:
+      - name: 📊 Determine Status
+        id: status
+        run: |
+          if [ "${{ needs.integration-tests.result }}" = "success" ]; then
+            echo "status=✅ SUCCESS" >> $GITHUB_OUTPUT
+            echo "message=All integration tests passed!" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.integration-tests.result }}" = "failure" ]; then
+            echo "status=❌ FAILED" >> $GITHUB_OUTPUT  
+            echo "message=Some integration tests failed" >> $GITHUB_OUTPUT
+          else
+            echo "status=⚠️ MIXED" >> $GITHUB_OUTPUT
+            echo "message=Tests completed with mixed results" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: 📝 Summary
+        run: |
+          echo "## 🚀 Bhumi Integration Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Status**: ${{ steps.status.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Message**: ${{ steps.status.outputs.message }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Useful Links" >> $GITHUB_STEP_SUMMARY
+          echo "- [Test Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [Repository](https://github.com/${{ github.repository }})" >> $GITHUB_STEP_SUMMARY 
