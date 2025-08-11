@@ -1,0 +1,124 @@
+name: ✅ Check Release Readiness
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check-build:
+    name: 🔍 Test Build Process
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.11']
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 🦀 Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 🔧 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin
+
+      - name: 🏗️ Test Build
+        run: |
+          maturin build --release
+          echo "✅ Build successful on ${{ matrix.os }} with Python ${{ matrix.python-version }}"
+
+      - name: 🧪 Test Installation
+        run: |
+          pip install target/wheels/*.whl
+          python -c "import bhumi; print('✅ Import successful')"
+
+  check-version:
+    name: 🏷️ Check Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 🔍 Check Version Format
+        run: |
+          python -c "
+          import re
+          with open('pyproject.toml') as f:
+              content = f.read()
+          
+          version_match = re.search(r'version = \"([^\"]+)\"', content)
+          if not version_match:
+              print('❌ No version found in pyproject.toml')
+              exit(1)
+          
+          version = version_match.group(1)
+          print(f'📦 Current version: {version}')
+          
+          # Check semantic versioning format
+          if not re.match(r'^\d+\.\d+\.\d+(?:-[a-zA-Z0-9]+)?$', version):
+              print(f'❌ Invalid version format: {version}')
+              print('Use semantic versioning (e.g., 1.0.0, 1.0.0-beta1)')
+              exit(1)
+          
+          print('✅ Version format is valid')
+          "
+
+  check-dependencies:
+    name: 📋 Check Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🔍 Validate pyproject.toml
+        run: |
+          python -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              data = tomllib.load(f)
+          
+          print('✅ pyproject.toml is valid TOML')
+          print(f'📦 Package: {data[\"project\"][\"name\"]}')
+          print(f'🏷️ Version: {data[\"project\"][\"version\"]}')
+          print(f'📝 Description: {data[\"project\"][\"description\"]}')
+          print(f'👤 Authors: {data[\"project\"][\"authors\"]}')
+          print(f'🐍 Python requirement: {data[\"project\"][\"requires-python\"]}')
+          print(f'📦 Dependencies: {data[\"project\"][\"dependencies\"]}')
+          "
+
+      - name: 🔍 Check Required Files
+        run: |
+          echo "Checking required files for release..."
+          
+          files_to_check=(
+            "README.md"
+            "LICENSE" 
+            "pyproject.toml"
+            "Cargo.toml"
+            "src/lib.rs"
+          )
+          
+          for file in "${files_to_check[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file exists"
+            else
+              echo "❌ $file is missing"
+              exit 1
+            fi
+          done
+          
+          echo "✅ All required files present"
