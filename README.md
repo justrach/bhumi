@@ -20,9 +20,20 @@ Bhumi is the fastest AI inference client, built with Rust for Python. It is desi
 Bhumi (भूमि) is Sanskrit for **Earth**, symbolizing **stability, grounding, and speed**—just like our inference engine, which ensures rapid and stable performance. 🚀
 
 ## Installation
+
+**No Rust compiler required!** 🎊 Pre-compiled wheels are available for all major platforms:
+
 ```bash
 pip install bhumi
 ```
+
+**Supported Platforms:**
+- 🐧 Linux (x86_64) 
+- 🍎 macOS (Intel & Apple Silicon)
+- 🪟 Windows (x86_64)
+- 🐍 Python 3.8, 3.9, 3.10, 3.11, 3.12
+
+*Previous versions required Rust installation. Now it's just one command!*
 
 ## Quick Start
 
@@ -111,6 +122,110 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+## Provider API: Multi-Provider Model Format
+
+Bhumi unifies providers using a simple `provider/model` format in `LLMConfig.model`. Base URLs are auto-set for known providers; you can override with `base_url`.
+
+- Supported providers: `openai`, `anthropic`, `gemini`, `groq`, `sambanova`, `openrouter`, `cerebras`
+- Foundation providers use `provider/model`. Gateways like Groq/OpenRouter/SambaNova may use nested paths after the provider (e.g., `openrouter/meta-llama/llama-3.1-8b-instruct`).
+
+```python
+from bhumi.base_client import BaseLLMClient, LLMConfig
+
+# OpenAI
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("OPENAI_API_KEY"), model="openai/gpt-4o"))
+
+# Anthropic
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("ANTHROPIC_API_KEY"), model="anthropic/claude-3-5-sonnet-latest"))
+
+# Gemini (OpenAI-compatible endpoint)
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("GEMINI_API_KEY"), model="gemini/gemini-2.0-flash"))
+
+# Groq (gateway) – nested path after provider is kept intact
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("GROQ_API_KEY"), model="groq/llama-3.1-8b-instant"))
+
+# Cerebras (gateway)
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("CEREBRAS_API_KEY"), model="cerebras/llama3.1-8b", base_url="https://api.cerebras.ai/v1"))
+
+# SambaNova (gateway)
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("SAMBANOVA_API_KEY"), model="sambanova/Meta-Llama-3.1-405B-Instruct"))
+
+# OpenRouter (gateway)
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("OPENROUTER_API_KEY"), model="openrouter/meta-llama/llama-3.1-8b-instruct"))
+
+# Optional: override base URL
+client = BaseLLMClient(LLMConfig(api_key="...", model="openai/gpt-4o", base_url="https://api.openai.com/v1"))
+```
+
+## Tool Use (Function Calling)
+
+Bhumi supports OpenAI-style function calling and Gemini function declarations. Register Python callables with JSON schemas; Bhumi will add them to requests and execute tool calls automatically.
+
+```python
+import os, asyncio, json
+from bhumi.base_client import BaseLLMClient, LLMConfig
+
+# 1) Define a tool
+def get_weather(location: str, unit: str = "celsius"):
+    return {"location": location, "unit": unit, "forecast": "sunny", "temp": 27}
+
+tool_schema = {
+    "type": "object",
+    "properties": {
+        "location": {"type": "string", "description": "City and country"},
+        "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+    },
+    "required": ["location"]
+}
+
+async def main():
+    client = BaseLLMClient(LLMConfig(api_key=os.getenv("OPENAI_API_KEY"), model="openai/gpt-4o", debug=True))
+    client.register_tool("get_weather", get_weather, "Get the current weather", tool_schema)
+
+    # 2) Ask a question that should trigger a tool call
+    resp = await client.completion([
+        {"role": "user", "content": "What's the weather in Tokyo in celsius?"}
+    ])
+
+    print(resp["text"])  # Tool is executed and response incorporates tool output
+
+asyncio.run(main())
+```
+
+Notes:
+
+- OpenAI-compatible providers use `tools` with `tool_calls` in responses; Gemini uses `function_declarations` and `tool_config` under the hood.
+- Bhumi parses tool calls, executes your Python function, appends a `tool` message, and continues the conversation automatically.
+
+## Structured Output via Pydantic
+
+Generate schema-conformant JSON using a Pydantic model. Bhumi registers a hidden tool `generate_structured_output` for the model; the LLM will call it to return strictly-typed data.
+
+```python
+from pydantic import BaseModel
+from bhumi.base_client import BaseLLMClient, LLMConfig
+
+class UserInfo(BaseModel):
+    """Return the user's full_name and age"""
+    full_name: str
+    age: int
+
+async def main():
+    client = BaseLLMClient(LLMConfig(api_key=os.getenv("OPENAI_API_KEY"), model="openai/gpt-4o", debug=True))
+    client.set_structured_output(UserInfo)
+
+    resp = await client.completion([
+        {"role": "user", "content": "Extract name and age from: Alice Johnson, age 29"}
+    ])
+
+    # The model uses the registered tool so the final message contains strict JSON
+    print(resp["text"])  # e.g., {"full_name": "Alice Johnson", "age": 29}
+
+asyncio.run(main())
+```
+
+Dependencies: structured output uses Pydantic v2. Ensure `pydantic>=2` is installed (bundled as a dependency).
 
 ## Streaming Support
 All providers support streaming responses:

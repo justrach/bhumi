@@ -1,0 +1,251 @@
+name: 🚀 Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.4.0)'
+        required: true
+      test_pypi:
+        description: 'Upload to Test PyPI instead of PyPI'
+        type: boolean
+        default: false
+
+jobs:
+  # Build wheels for Linux, macOS, and Windows
+  build-wheels:
+    name: 🏗️ Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-13, macos-14]  # Intel and Apple Silicon macOS
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 🦀 Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 🔧 Install cibuildwheel
+        run: python -m pip install cibuildwheel==2.16.2
+
+      - name: 🏗️ Build wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          # Build for Python 3.8-3.12
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
+          
+          # Skip 32-bit builds and musl builds for simplicity
+          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux*"
+          
+          # Use maturin to build wheels
+          CIBW_BUILD_FRONTEND: "build"
+          CIBW_BEFORE_BUILD: "pip install maturin"
+          CIBW_BUILD_VERBOSITY: 1
+          
+          # macOS deployment targets
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.12
+          
+          # Test the built wheels
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: "python -c 'import bhumi; print(\"Bhumi wheel test successful!\")'"
+
+      - name: 📤 Upload wheels as artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  # Build source distribution
+  build-sdist:
+    name: 📦 Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 🦀 Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 🔧 Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install maturin build
+
+      - name: 📦 Build source distribution
+        run: maturin sdist --out dist
+
+      - name: 📤 Upload sdist as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  # Test installation from wheels
+  test-wheels:
+    name: 🧪 Test wheel installation
+    needs: [build-wheels]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - name: 📥 Download wheels
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse
+
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 🔍 Install and test wheel
+        run: |
+          python -m pip install --upgrade pip
+          # Find and install the appropriate wheel for this Python version
+          python -c "
+          import os, sys
+          version = f'{sys.version_info.major}{sys.version_info.minor}'
+          wheels = [f for f in os.listdir('wheelhouse') if f.endswith('.whl') and f'cp{version}' in f]
+          if wheels:
+              os.system(f'pip install wheelhouse/{wheels[0]}')
+              print(f'Installed wheel: {wheels[0]}')
+          else:
+              print(f'No wheel found for Python {sys.version_info.major}.{sys.version_info.minor}')
+              exit(1)
+          "
+          
+          # Test the installation
+          python -c "
+          try:
+              import bhumi
+              print('✅ Bhumi imported successfully')
+              from bhumi.utils import print_performance_status
+              print_performance_status()
+              print('✅ All tests passed!')
+          except Exception as e:
+              print(f'❌ Test failed: {e}')
+              exit(1)
+          "
+
+  # Create GitHub release
+  create-release:
+    name: 📋 Create GitHub Release
+    needs: [build-wheels, build-sdist, test-wheels]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📥 Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: dist
+
+      - name: 📁 Organize artifacts
+        run: |
+          mkdir -p final-dist
+          find dist -name "*.whl" -exec cp {} final-dist/ \;
+          find dist -name "*.tar.gz" -exec cp {} final-dist/ \;
+          ls -la final-dist/
+
+      - name: 📋 Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: final-dist/*
+          generate_release_notes: true
+          body: |
+            ## 🎉 Bhumi Release ${{ github.ref_name }}
+            
+            Pre-compiled wheels are now available for:
+            - 🐍 Python 3.8, 3.9, 3.10, 3.11, 3.12
+            - 🖥️ Linux (x86_64)
+            - 🍎 macOS (Intel & Apple Silicon)
+            - 🪟 Windows (x86_64)
+            
+            ### Installation
+            ```bash
+            pip install bhumi==${{ github.ref_name }}
+            ```
+            
+            **No Rust compiler required!** 🎊
+            
+            See the full changelog and documentation for more details.
+
+  # Publish to PyPI
+  publish-pypi:
+    name: 🚀 Publish to PyPI
+    needs: [build-wheels, build-sdist, test-wheels]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.version
+
+    steps:
+      - name: 📥 Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: dist
+
+      - name: 📁 Organize artifacts for PyPI
+        run: |
+          mkdir -p pypi-dist
+          find dist -name "*.whl" -exec cp {} pypi-dist/ \;
+          find dist -name "*.tar.gz" -exec cp {} pypi-dist/ \;
+          ls -la pypi-dist/
+
+      - name: 🚀 Publish to Test PyPI
+        if: github.event.inputs.test_pypi == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: pypi-dist/
+
+      - name: 🚀 Publish to PyPI
+        if: startsWith(github.ref, 'refs/tags/') && github.event.inputs.test_pypi != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: pypi-dist/
+
+  # Notify on completion
+  notify:
+    name: 📢 Notify Release Complete
+    needs: [create-release, publish-pypi]
+    runs-on: ubuntu-latest
+    if: always() && (startsWith(github.ref, 'refs/tags/') || github.event.inputs.version)
+
+    steps:
+      - name: 📢 Success Notification
+        if: needs.create-release.result == 'success' && needs.publish-pypi.result == 'success'
+        run: |
+          echo "🎉 Release completed successfully!"
+          echo "✅ GitHub release created"
+          echo "✅ Published to PyPI"
+          echo "Users can now install with: pip install bhumi"
+
+      - name: ⚠️ Failure Notification
+        if: needs.create-release.result == 'failure' || needs.publish-pypi.result == 'failure'
+        run: |
+          echo "❌ Release failed!"
+          echo "Check the logs above for details"
+          exit 1
