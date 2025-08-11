@@ -1,0 +1,116 @@
+Bhumi LLM Quickstart
+====================
+
+Overview
+--------
+Bhumi is a high-performance Rust-powered Python client for LLM providers.
+Key features: fast async/streaming, multi-provider support, function calling (tools), structured output, automatic retries/pooling, and optimized buffering.
+
+Install
+-------
+    pip install bhumi
+
+Core API
+--------
+- Config: bhumi.base_client.LLMConfig
+- Client: bhumi.base_client.BaseLLMClient
+- Completion: await client.completion(messages[, stream=False, max_tokens=..., ...])
+- Streaming: async for chunk in await client.completion(messages, stream=True): ...
+
+Providers and Model Format
+--------------------------
+Use model="provider/model". Base URL auto-sets for known providers; override with base_url if needed.
+Supported: openai, anthropic, gemini, groq, sambanova, openrouter, cerebras
+
+Examples
+--------
+OpenAI
+    from bhumi.base_client import BaseLLMClient, LLMConfig
+    client = BaseLLMClient(LLMConfig(api_key=OPENAI_API_KEY, model="openai/gpt-4o"))
+    resp = await client.completion([{ "role": "user", "content": "Hello!" }])
+
+Anthropic
+    client = BaseLLMClient(LLMConfig(api_key=ANTHROPIC_API_KEY, model="anthropic/claude-3-5-sonnet-latest"))
+
+Gemini (OpenAI-compatible endpoint)
+    client = BaseLLMClient(LLMConfig(api_key=GEMINI_API_KEY, model="gemini/gemini-2.0-flash"))
+
+Cerebras (gateway)
+    client = BaseLLMClient(LLMConfig(api_key=CEREBRAS_API_KEY,
+                                     model="cerebras/llama3.1-8b",
+                                     base_url="https://api.cerebras.ai/v1"))
+
+Streaming
+---------
+    async for token in await client.completion([
+        {"role": "user", "content": "Write a haiku about the sea"}
+    ], stream=True):
+        print(token, end="")
+
+Function Calling (Tools)
+------------------------
+See: src/bhumi/tools.py and BaseLLMClient.register_tool() in src/bhumi/base_client.py
+
+1) Define a Python function and JSON schema
+    def get_weather(location: str, unit: str = "celsius"): ...
+    schema = {
+        "type": "object",
+        "properties": {
+            "location": {"type": "string"},
+            "unit": {"type": "string", "enum": ["celsius","fahrenheit"]}
+        },
+        "required": ["location"]
+    }
+
+2) Register it
+    client.register_tool("get_weather", get_weather, "Get the weather", schema)
+
+3) Call completion normally; Bhumi will:
+   - Advertise tools to supported providers
+   - Detect tool calls in responses
+   - Execute your Python function
+   - Append a tool message and continue the conversation automatically
+
+Note: Some providers (e.g., Cerebras) do not support the "strict" flag in tool definitions.
+Bhumi strips unsupported fields automatically.
+
+Structured Output (Pydantic)
+----------------------------
+- Provide a Pydantic model; Bhumi registers a hidden tool to produce strict JSON.
+- Dependencies: pydantic>=2.0
+
+    from pydantic import BaseModel
+    class UserInfo(BaseModel):
+        full_name: str
+        age: int
+
+    client.set_structured_output(UserInfo)
+    resp = await client.completion([
+        {"role": "user", "content": "Alice Johnson, age 29"}
+    ])
+    # resp["text"] contains strict JSON for UserInfo
+
+Configuration Tips
+------------------
+- Headers are handled internally. For Anthropic, x-api-key is used; others use Authorization: Bearer.
+- max_tokens: pass via completion(..., max_tokens=...) or set in LLMConfig.
+- base_url: override if using proxies/gateways.
+
+Performance
+-----------
+- Optimized async runtime (Rust tokio), connection pooling, retries.
+- Dynamic and MAP-Elites buffer strategies for fast streaming.
+- Diagnostics: from bhumi.utils import print_performance_status
+
+Common Issues
+-------------
+- 401/403: check API keys and selected model.
+- wrong_api_format / tools: provider may not support some tool fields; Bhumi sanitizes for Cerebras.
+- Rate limits: implement backoff/retry at caller level if needed (Bhumi already retries core requests).
+
+References
+----------
+- Client: src/bhumi/base_client.py
+- Tools: src/bhumi/tools.py
+- Rust core: src/lib.rs
+- Examples: README.md, test_tool_calling.py, test_tool_calling_cerebras.py
