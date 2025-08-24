@@ -36,6 +36,10 @@ class LLMConfig:
         if not self.provider and "/" in self.model:
             self.provider = self.model.split("/")[0]
         
+        # Normalize provider alias ending with '!'
+        if self.provider and self.provider.endswith("!"):
+            self.provider = self.provider[:-1]
+        
         # Set default base URL if not provided
         if not self.base_url:
             if self.provider == "openai":
@@ -48,6 +52,8 @@ class LLMConfig:
                 self.base_url = "https://api.sambanova.ai/v1"
             elif self.provider == "groq":
                 self.base_url = "https://api.groq.com/openai/v1"
+            elif self.provider == "cerebras":
+                self.base_url = "https://api.cerebras.ai/v1"
             elif self.provider == "openrouter":
                 self.base_url = "https://openrouter.ai/api/v1"
             else:
@@ -70,7 +76,7 @@ def parse_streaming_chunk(chunk: str, provider: str) -> str:
                     data = json.loads(data_str)
                     
                     # Extract content based on provider format
-                    if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini']:
+                    if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini', 'cerebras']:
                         # OpenAI-compatible format
                         if 'choices' in data and len(data['choices']) > 0:
                             delta = data['choices'][0].get('delta', {})
@@ -346,7 +352,7 @@ class BaseLLMClient:
         # Gateway providers (groq, openrouter, sambanova) may use provider/company/model format
         if '/' in self.config.model:
             parts = self.config.model.split('/')
-            if self.config.provider in ['groq', 'openrouter', 'sambanova']:
+            if self.config.provider in ['groq', 'openrouter', 'sambanova', 'cerebras']:
                 # Gateway providers: keep everything after provider (handles company/model)
                 model = "/".join(parts[1:])
                 pass  # Gateway provider parsing
