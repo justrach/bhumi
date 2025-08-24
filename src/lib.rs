@@ -196,7 +196,14 @@ impl BhumiCore {
                                 
                                 let response = match provider.as_str() {
                                     _ => {
-                                        let url = if provider == "anthropic" {
+                                        // Allow Python layer to override endpoint (e.g., images API)
+                                        let endpoint_override = request_json
+                                            .get("_endpoint")
+                                            .and_then(|v| v.as_str());
+
+                                        let url = if let Some(ep) = endpoint_override {
+                                            ep.to_string()
+                                        } else if provider == "anthropic" {
                                             format!("{}/messages", base_url)
                                         } else {
                                             format!("{}/chat/completions", base_url)
@@ -228,12 +235,13 @@ impl BhumiCore {
                                         // Remove _headers from request before sending
                                         let mut request_body = request_json.clone();
                                         request_body.as_object_mut().map(|obj| {
-                                            obj.remove("_headers");  // Remove internal headers
-                                            
+                                            // Remove internal-only fields
+                                            obj.remove("_headers");
+                                            obj.remove("_endpoint");
+
                                             // Keep max_tokens if it exists and is not null
                                             if let Some(max_tokens) = obj.get("max_tokens") {
                                                 if !max_tokens.is_null() {
-                                                    // Keep max_tokens in the request
                                                     obj.insert("max_tokens".to_string(), max_tokens.clone());
                                                 }
                                             }

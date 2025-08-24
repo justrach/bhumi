@@ -1,7 +1,15 @@
 import asyncio
-from bhumi.base_client import BaseLLMClient, LLMConfig
 import os
+import sys
 import json
+
+# Prefer local source in development
+ROOT = os.path.dirname(os.path.dirname(__file__))
+SRC = os.path.join(ROOT, "src")
+if os.path.isdir(SRC) and SRC not in sys.path:
+    sys.path.insert(0, SRC)
+
+from bhumi.base_client import BaseLLMClient, LLMConfig
 
 # Example weather tool function
 async def get_weather(location: str, unit: str = "f") -> str:
@@ -11,8 +19,8 @@ async def get_weather(location: str, unit: str = "f") -> str:
 
 async def main():
     config = LLMConfig(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="openai/gpt-4o-mini",  # Let's use standard gpt-4 for testing
+        api_key=os.getenv("GEMINI_API_KEY"),
+        model="gemini/gemini-2.5-flash",  # Let's use standard gpt-4 for testing
         # debug=True
     )
     
@@ -48,11 +56,16 @@ async def main():
     ]
     
     print(f"\nSending messages: {json.dumps(messages, indent=2)}")
+    # Print tool schema
+    print("\nAnthropic tool defs:")
+    try:
+        print(json.dumps(client.tool_registry.get_anthropic_definitions(), indent=2))
+    except Exception as e:
+        print(f"(could not get defs) {e}")
     
     try:
-        response = await client.completion(messages)
-        # print(f"\nFinal Response: {json.dumps(response, indent=2)}")
-        print(f"\nFinal Response: {response['text']}")
+        response = await client.completion(messages, debug=True)
+        print(f"\nFinal Response (raw): {json.dumps(response, indent=2)}")
     except Exception as e:
         print(f"\nError during completion: {e}")
 

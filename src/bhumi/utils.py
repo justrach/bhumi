@@ -3,6 +3,8 @@ from functools import wraps
 import logging
 from typing import TypeVar, Callable, Any
 import os
+import json
+import re
 
 T = TypeVar('T')
 
@@ -121,3 +123,73 @@ def print_performance_status():
     print(f"💡 {status['recommendation']}")
     
     return status['optimized'] 
+
+def _find_balanced_segment(text: str, open_char: str, close_char: str) -> str:
+    """
+    Find first balanced segment for given delimiters.
+    Returns the substring if found, else empty string.
+    """
+    start = text.find(open_char)
+    if start == -1:
+        return ""
+    depth = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == open_char:
+            depth += 1
+        elif c == close_char:
+            depth -= 1
+            if depth == 0:
+                return text[start:i+1]
+    return ""
+
+def extract_json_from_text(text: str) -> Any:
+    """
+    Best-effort extraction of JSON object/array from arbitrary text.
+    - Tries direct json.loads
+    - Tries fenced ```json blocks
+    - Tries first balanced {...} or [...] segment
+    Raises ValueError if nothing valid is found.
+    """
+    text = text.strip()
+    # Direct parse
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # Fenced json block
+    fence = re.search(r"```\s*json\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if fence:
+        block = fence.group(1).strip()
+        try:
+            return json.loads(block)
+        except Exception:
+            pass
+
+    # Balanced object
+    obj = _find_balanced_segment(text, '{', '}')
+    if obj:
+        try:
+            return json.loads(obj)
+        except Exception:
+            pass
+
+    # Balanced array
+    arr = _find_balanced_segment(text, '[', ']')
+    if arr:
+        try:
+            return json.loads(arr)
+        except Exception:
+            pass
+
+    raise ValueError("No valid JSON found in text")
+
+def parse_json_loosely(text: str, default: Any = None) -> Any:
+    """
+    Loosely parse JSON from text. Returns default if not found.
+    """
+    try:
+        return extract_json_from_text(text)
+    except Exception:
+        return default
