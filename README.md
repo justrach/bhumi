@@ -3,6 +3,10 @@
 </p>
 
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/justrach/bhumi)
+
+[![PyPI - Version](https://img.shields.io/pypi/v/bhumi.svg)](https://pypi.org/project/bhumi/)
+
 # 🌍 **BHUMI - The Fastest AI Inference Client** ⚡
 
 ## **Introduction**
@@ -11,7 +15,7 @@ Bhumi is the fastest AI inference client, built with Rust for Python. It is desi
 ### **Why Bhumi?**
 - 🚀 **Fastest AI inference client** – Outperforms alternatives with **2-3x higher throughput**
 - ⚡ **Built with Rust for Python** – Achieves high efficiency with low overhead
-- 🌐 **Supports multiple AI providers** – OpenAI, Anthropic, Google Gemini, Groq, SambaNova, and more
+- 🌐 **Supports multiple AI providers** – OpenAI, Anthropic, Google Gemini, Groq, Cerebras, SambaNova, and more
 - 🔄 **Streaming and async capabilities** – Real-time responses with Rust-powered concurrency
 - 🔁 **Automatic connection pooling and retries** – Ensures reliability and efficiency
 - 💡 **Minimal memory footprint** – Uses up to **60% less memory** than other clients
@@ -116,6 +120,32 @@ async def main():
     
     response = await client.completion([
         {"role": "user", "content": "Tell me a joke"}
+    ])
+    print(f"Response: {response['text']}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Cerebras Example
+```python
+import asyncio
+from bhumi.base_client import BaseLLMClient, LLMConfig
+import os
+
+api_key = os.getenv("CEREBRAS_API_KEY")
+
+async def main():
+    config = LLMConfig(
+        api_key=api_key,
+        model="cerebras/llama3.1-8b",  # gateway-style model parsing is supported
+        debug=True,
+    )
+
+    client = BaseLLMClient(config)
+
+    response = await client.completion([
+        {"role": "user", "content": "Summarize the benefits of Bhumi in one sentence."}
     ])
     print(f"Response: {response['text']}")
 

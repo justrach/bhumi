@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Union, AsyncIterator, Any, Callable, Type, get_type_hints
-from .utils import async_retry
+from .utils import async_retry, extract_json_from_text, parse_json_loosely
 import bhumi.bhumi as _rust
 import json
 import asyncio
 import os
+import base64
 from .map_elites_buffer import MapElitesBuffer
 import statistics
 from .tools import ToolRegistry, Tool, ToolCall
@@ -35,6 +36,10 @@ class LLMConfig:
         if not self.provider and "/" in self.model:
             self.provider = self.model.split("/")[0]
         
+        # Normalize provider alias ending with '!'
+        if self.provider and self.provider.endswith("!"):
+            self.provider = self.provider[:-1]
+        
         # Set default base URL if not provided
         if not self.base_url:
             if self.provider == "openai":
@@ -47,6 +52,8 @@ class LLMConfig:
                 self.base_url = "https://api.sambanova.ai/v1"
             elif self.provider == "groq":
                 self.base_url = "https://api.groq.com/openai/v1"
+            elif self.provider == "cerebras":
+                self.base_url = "https://api.cerebras.ai/v1"
             elif self.provider == "openrouter":
                 self.base_url = "https://openrouter.ai/api/v1"
             else:
@@ -69,7 +76,7 @@ def parse_streaming_chunk(chunk: str, provider: str) -> str:
                     data = json.loads(data_str)
                     
                     # Extract content based on provider format
-                    if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini']:
+                    if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini', 'cerebras']:
                         # OpenAI-compatible format
                         if 'choices' in data and len(data['choices']) > 0:
                             delta = data['choices'][0].get('delta', {})
@@ -155,13 +162,19 @@ class StructuredOutput:
     
     def parse_response(self, response: str) -> BaseModel:
         """Parse LLM response into structured output"""
+        # Strict JSON first
         try:
-            # Try parsing as JSON first
             data = json.loads(response)
             return self.output_type.model_validate(data)
         except json.JSONDecodeError:
-            # If not JSON, try to extract structured data from text
-            return self._extract_structured_data(response)
+            pass
+
+        # Loose extraction from text
+        data = parse_json_loosely(response)
+        if data is not None:
+            return self.output_type.model_validate(data)
+
+        raise ValueError("Response is not in structured format")
     
     def _extract_structured_data(self, text: str) -> BaseModel:
         """Extract structured data from text response"""
@@ -312,7 +325,7 @@ class BaseLLMClient:
 
     async def completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         stream: bool = False,
         debug: bool = False,
         **kwargs
@@ -325,18 +338,21 @@ class BaseLLMClient:
             return self.astream_completion(messages, **kwargs)
             
         # Add tools to request if any are registered
-        if self.tool_registry.get_definitions():
-            tools = [tool.__dict__ for tool in self.tool_registry.get_definitions()]
+        if self.tool_registry.get_public_definitions():
+            if self.config.provider == "anthropic":
+                tools = self.tool_registry.get_anthropic_definitions()
+            else:
+                tools = self.tool_registry.get_public_definitions()
             kwargs["tools"] = tools
             if debug:
-                print(f"\nRegistered tools: {json.dumps(tools, indent=2)}")
+                print(f"\nRegistered tools ({self.config.provider}): {json.dumps(tools, indent=2)}")
             
         # Extract model name after provider
         # Foundation model providers (openai, anthropic, gemini) use simple provider/model format
         # Gateway providers (groq, openrouter, sambanova) may use provider/company/model format
         if '/' in self.config.model:
             parts = self.config.model.split('/')
-            if self.config.provider in ['groq', 'openrouter', 'sambanova']:
+            if self.config.provider in ['groq', 'openrouter', 'sambanova', 'cerebras']:
                 # Gateway providers: keep everything after provider (handles company/model)
                 model = "/".join(parts[1:])
                 pass  # Gateway provider parsing
@@ -360,70 +376,34 @@ class BaseLLMClient:
         kwargs.pop('debug', None)
         
         # Prepare request
+        # Only include max_tokens if provided (avoid null/None in provider payloads)
+        req_max_tokens = kwargs.pop("max_tokens", self.config.max_tokens)
+        # Anthropic requires max_tokens; default if missing
+        if self.config.provider == "anthropic" and req_max_tokens is None:
+            req_max_tokens = 1024
         request = {
             "_headers": headers,
             "model": model,
             "messages": messages,
             "stream": False,
-            "max_tokens": kwargs.pop("max_tokens", self.config.max_tokens),
             **kwargs
         }
+        if req_max_tokens is not None:
+            request["max_tokens"] = req_max_tokens
         
-        # Handle Gemini-specific formatting
-        if self.config.provider == "gemini":
-            model_name = model.split('/')[-1]
-            endpoint = f"{self.config.base_url}/models/{model_name}:generateContent"
-            request["_endpoint"] = endpoint
-            
-            # Convert messages to Gemini format
-            gemini_request = {
-                "contents": [{
-                    "role": "user",
-                    "parts": [{
-                        "text": messages[-1]["content"]
-                    }]
-                }]
-            }
-            
-            # Add system instruction if present
-            if len(messages) > 1 and messages[0]["role"] == "system":
-                gemini_request["contents"].insert(0, {
-                    "role": "system",
-                    "parts": [{
-                        "text": messages[0]["content"]
-                    }]
-                })
-            
-            # Add tools if registered
-            if self.tool_registry.get_definitions():
-                tools = [tool.__dict__ for tool in self.tool_registry.get_definitions()]
-                gemini_request["tools"] = {
-                    "function_declarations": [
-                        {
-                            "name": tool["function"]["name"],
-                            "description": tool["function"]["description"],
-                            "parameters": tool["function"]["parameters"]
-                        } for tool in tools
-                    ]
-                }
-                
-                # Add tool config
-                gemini_request["tool_config"] = {
-                    "function_calling_config": {"mode": "auto"}
-                }
-            
-            # Replace request with Gemini format
-            request = {
-                "_headers": {
-                    "Authorization": f"Bearer {self.config.api_key}"
-                },
-                "_endpoint": endpoint,
-                **gemini_request
-            }
-            
-            if debug:
-                print(f"\nGemini request: {json.dumps(request, indent=2)}")
+        # Gemini now uses OpenAI-compatible chat/completions path; no special formatting.
         
+        # Provider-specific payload normalization
+        if self.config.provider == "anthropic":
+            # Transform messages to Anthropic block schema if needed
+            norm_msgs = []
+            for m in request.get("messages", []):
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    content = [{"type": "text", "text": content}]
+                norm_msgs.append({"role": m.get("role", "user"), "content": content})
+            request["messages"] = norm_msgs
+
         if debug:
             print(f"\nSending request: {json.dumps(request, indent=2)}")
         
@@ -484,8 +464,8 @@ class BaseLLMClient:
                                 if debug:
                                     print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
                                 
-                                # Make a new request with the updated messages
-                                request["contents"][-1]["parts"][0]["text"] = messages[-1]["content"]
+                                # Make a new request with the updated messages (OpenAI-compatible continuation)
+                                request["messages"] = messages
                                 self.core._submit(json.dumps(request))
                                 continue
                             
@@ -608,16 +588,213 @@ class BaseLLMClient:
                 except Exception as e:
                     if debug:
                         print(f"\nError parsing response: {e}")
-                        print(f"Response that caused error: {response}")
                     return {
                         "text": str(response),
                         "raw_response": {"text": str(response)}
                     }
             await asyncio.sleep(0.1)
+
+    async def generate_image(
+        self,
+        prompt: str,
+        *,
+        model: Optional[str] = None,
+        size: str = "1024x1024",
+        n: int = 1,
+        response_format: str = "b64_json",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """
+        Generate image(s) via OpenAI-compatible v1 images endpoint.
+        Returns the raw JSON dict from the provider.
+        """
+        base_url = self.config.base_url or "https://api.openai.com/v1"
+        endpoint = f"{base_url}/images/generations"
+
+        headers = (
+            {"x-api-key": self.config.api_key}
+            if self.config.provider == "anthropic"
+            else {"Authorization": f"Bearer {self.config.api_key}"}
+        )
+
+        if model is None:
+            if "/" in self.config.model:
+                model = self.config.model.split("/")[-1]
+            else:
+                model = self.config.model
+
+        request: Dict[str, Any] = {
+            "_headers": headers,
+            "_endpoint": endpoint,
+            "model": model,
+            "prompt": prompt,
+            "n": n,
+            "size": size,
+            "response_format": response_format,
+            **kwargs,
+        }
+
+        if self.debug:
+            print(f"\nSending image generation request: {json.dumps(request, indent=2)[:1000]}...")
+
+        self.core._submit(json.dumps(request))
+
+        start = asyncio.get_event_loop().time()
+        while True:
+            if response := self.core._get_response():
+                try:
+                    return json.loads(response)
+                except Exception:
+                    return {"raw": response}
+            if asyncio.get_event_loop().time() - start > self.config.timeout:
+                raise TimeoutError("Image generation timed out")
+            await asyncio.sleep(0.05)
+
+    async def analyze_image(
+        self,
+        *,
+        prompt: str,
+        image_path: str,
+        max_tokens: int = 128,
+    ) -> Dict[str, Any]:
+        """Analyze/describe an image with a text prompt via provider VLM APIs.
+
+        Providers:
+        - anthropic: messages API with image block
+        - gemini: native generateContent with inline_data
+        """
+        # Derive short model name
+        if '/' in self.config.model:
+            model = self.config.model.split('/')[-1]
+        else:
+            model = self.config.model
+
+        # Base64 encode image and guess MIME
+        ext = os.path.splitext(image_path)[1].lower()
+        mime = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+        }.get(ext, "image/png")
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        if self.config.provider == "anthropic":
+            headers = {"x-api-key": self.config.api_key}
+            request: Dict[str, Any] = {
+                "_headers": headers,
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": mime, "data": b64},
+                            },
+                        ],
+                    }
+                ],
+                "max_tokens": max_tokens,
+            }
+        elif self.config.provider in ("gemini", "openai"):
+            # Always force OpenAI-compatible chat/completions with explicit endpoint override
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                    ],
+                }
+            ]
+
+            # Choose provider-appropriate base URL, but allow explicit override via config.base_url
+            default_base = (
+                "https://api.openai.com/v1" if self.config.provider == "openai" else
+                "https://generativelanguage.googleapis.com/v1beta/openai"
+            )
+            endpoint = f"{(self.config.base_url or default_base)}/chat/completions"
+            request = {
+                "_headers": {"Authorization": f"Bearer {self.config.api_key}"},
+                "_endpoint": endpoint,
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+            }
+        else:
+            raise ValueError(f"analyze_image not supported for provider: {self.config.provider}")
+
+        if self.debug:
+            try:
+                dbg = {k: v for k, v in request.items() if k != "_headers"}
+                print(f"\nSending image analysis request: {json.dumps(dbg, indent=2)[:1000]}...")
+            except Exception:
+                pass
+            if self.config.provider == "gemini":
+                try:
+                    print(f"Gemini analyze_image debug: prompt_len={len(prompt)}, b64_len={len(b64)}, mime={mime}")
+                except Exception:
+                    pass
+
+        self.core._submit(json.dumps(request))
+
+        start = asyncio.get_event_loop().time()
+        while True:
+            if response := self.core._get_response():
+                try:
+                    data = json.loads(response)
+                except Exception:
+                    return {"raw_response": response}
+
+                if self.config.provider == "anthropic":
+                    text = None
+                    try:
+                        text = data.get("content", [{}])[0].get("text")
+                    except Exception:
+                        pass
+                    return {"text": text or str(data), "raw_response": data}
+                elif self.config.provider == "gemini":
+                    text = None
+                    try:
+                        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                        for p in parts:
+                            if isinstance(p, dict) and "text" in p:
+                                text = p["text"]
+                                break
+                    except Exception:
+                        pass
+                    return {"text": text or str(data), "raw_response": data}
+            if asyncio.get_event_loop().time() - start > self.config.timeout:
+                raise TimeoutError("Image analysis timed out")
+            await asyncio.sleep(0.05)
+
+    def register_image_tool(self) -> None:
+        """Register a tool named 'generate_image' available to the model."""
+        async def _image_tool(prompt: str, size: str = "1024x1024", n: int = 1) -> Dict[str, Any]:
+            return await self.generate_image(prompt=prompt, size=size, n=n)
+
+        self.register_tool(
+            name="generate_image",
+            func=_image_tool,
+            description="Generate image(s) from a text prompt using the provider's image API.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Text prompt to generate images"},
+                    "size": {"type": "string", "enum": ["256x256", "512x512", "1024x1024"]},
+                    "n": {"type": "integer", "minimum": 1, "maximum": 10},
+                },
+                "required": ["prompt"],
+                "additionalProperties": False,
+            },
+        )
     
     async def astream_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         **kwargs
     ) -> AsyncIterator[str]:
         """Stream completion responses"""
@@ -673,15 +850,7 @@ class BaseLLMClient:
                                 yield delta.get("text", "")
                         elif data.get("type") == "message_stop":
                             break
-                    elif self.config.provider == "gemini":
-                        # Handle Gemini's format
-                        if "candidates" in data:
-                            text = (data.get("candidates", [{}])[0]
-                                   .get("content", {})
-                                   .get("parts", [{}])[0]
-                                   .get("text", ""))
-                            if text:
-                                yield text
+                    # Gemini uses OpenAI-compatible SSE via the /openai path; handle in the default branch.
                     else:
                         # Handle OpenAI-compatible providers (OpenAI, Groq, OpenRouter, SambaNova)
                         if "choices" in data:
