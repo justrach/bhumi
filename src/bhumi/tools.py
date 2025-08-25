@@ -137,7 +137,6 @@ class ToolRegistry:
                         "name": t.function["name"],
                         "description": t.function["description"],
                         "parameters": params,
-                        "strict": t.function.get("strict", True),
                     },
                 }
             )

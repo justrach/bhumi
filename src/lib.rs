@@ -55,6 +55,7 @@ struct BhumiCore {
     max_concurrent: usize,
     active_requests: Arc<tokio::sync::RwLock<usize>>,
     debug: bool,
+    debug_debug: bool,
     client: Arc<reqwest::Client>,
     stream_buffer_size: usize,
     model: String,
@@ -75,6 +76,7 @@ impl BhumiCore {
         model="",
         use_grounding=false,
         debug=false,
+        debug_debug=false,
         stream_buffer_size=1000,
         base_url=None,
         buffer_size=131072  // Back to 128KB for optimal performance
@@ -85,6 +87,7 @@ impl BhumiCore {
         model: &str,
         use_grounding: bool,
         debug: bool,
+        debug_debug: bool,
         stream_buffer_size: usize,
         base_url: Option<&str>,
         buffer_size: usize,
@@ -107,7 +110,8 @@ impl BhumiCore {
         );
         let runtime_clone = runtime.clone();
 
-        let client = reqwest::Client::builder()
+        // Build HTTP client with optional HTTP/1.1 fallback and sensible timeouts
+        let mut client_builder = reqwest::Client::builder()
             .pool_max_idle_per_host(max_concurrent * 2)
             .tcp_keepalive(Some(std::time::Duration::from_secs(30)))
             .tcp_nodelay(true)
@@ -116,9 +120,11 @@ impl BhumiCore {
             .http2_keep_alive_timeout(std::time::Duration::from_secs(30))
             .http2_adaptive_window(true)
             .pool_max_idle_per_host(100)
-            .build()
-            .unwrap();
-        let client = Arc::new(client);
+            .connect_timeout(std::time::Duration::from_secs(10));
+        if std::env::var("BHUMI_HTTP1").ok().as_deref() == Some("1") {
+            client_builder = client_builder.http1_only();
+        }
+        let client = Arc::new(client_builder.build().unwrap());
 
         let stream_chunks = Arc::new(Mutex::new(VecDeque::new()));
 
@@ -149,6 +155,7 @@ impl BhumiCore {
             let active_requests = active_requests.clone();
             let client = client.clone();
             let debug = debug;
+            let debug_debug = debug_debug;
             let provider = provider.clone();
             let model = model.to_string();
             let use_grounding = use_grounding;
@@ -201,6 +208,7 @@ impl BhumiCore {
                                             .get("_endpoint")
                                             .and_then(|v| v.as_str());
 
+                                        if debug_debug { eprintln!("[bhumi][pre1] Worker {}: computing URL ...", worker_id); }
                                         let url = if let Some(ep) = endpoint_override {
                                             ep.to_string()
                                         } else if provider == "anthropic" {
@@ -208,8 +216,16 @@ impl BhumiCore {
                                         } else {
                                             format!("{}/chat/completions", base_url)
                                         };
+                                        if debug_debug { eprintln!("[bhumi][pre2] Worker {}: URL computed: {}", worker_id, url); }
+
+                                        // Determine if streaming request early for reuse
+                                        let is_streaming_req = request_json
+                                            .get("stream")
+                                            .and_then(|s| s.as_bool())
+                                            .unwrap_or(false);
 
                                         // Set up headers based on provider
+                                        if debug_debug { eprintln!("[bhumi][pre3] Worker {}: preparing headers ...", worker_id); }
                                         let mut headers = HeaderMap::new();
                                         if provider == "anthropic" {
                                             headers.insert(
@@ -222,6 +238,7 @@ impl BhumiCore {
                                             );
                                         } else {
                                             // For OpenAI, Groq, Gemini (OpenAI-compatible) etc.
+                                            if debug_debug { eprintln!("[bhumi][pre4] Worker {}: inserting Authorization header ...", worker_id); }
                                             headers.insert(
                                                 reqwest::header::AUTHORIZATION,
                                                 HeaderValue::from_str(api_key).unwrap()
@@ -233,20 +250,20 @@ impl BhumiCore {
                                         );
 
                                         // If streaming, explicitly accept event stream
-                                        if request_json
-                                            .get("stream")
-                                            .and_then(|s| s.as_bool())
-                                            .unwrap_or(false)
-                                        {
+                                        if is_streaming_req {
                                             headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
                                         }
 
+                                        if debug_debug { eprintln!("[bhumi][pre5] Worker {}: headers ready; cloning body ...", worker_id); }
                                         // Remove _headers from request before sending
                                         let mut request_body = request_json.clone();
+                                        if debug_debug { eprintln!("[bhumi][pre6] Worker {}: body cloned; sanitizing ...", worker_id); }
                                         request_body.as_object_mut().map(|obj| {
                                             // Remove internal-only fields
                                             obj.remove("_headers");
                                             obj.remove("_endpoint");
+                                            // Remove fields known to cause issues for some providers
+                                            obj.remove("strict");
 
                                             // Keep max_tokens if it exists and is not null
                                             if let Some(max_tokens) = obj.get("max_tokens") {
@@ -256,11 +273,78 @@ impl BhumiCore {
                                             }
                                         });
 
-                                        client.post(&url)
+                                        if debug_debug { eprintln!("[bhumi][pre7] Worker {}: body sanitized", worker_id); }
+                                        // Summarize sanitized request to help diagnose 4xx without exposing secrets (very verbose)
+                                        if debug_debug {
+                                            let model = request_body
+                                                .get("model")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            let msg_count = request_body
+                                                .get("messages")
+                                                .and_then(|m| m.as_array())
+                                                .map(|a| a.len())
+                                                .unwrap_or(0);
+                                            let tools_len_dbg = request_body
+                                                .get("tools")
+                                                .and_then(|t| t.as_array())
+                                                .map(|a| a.len())
+                                                .unwrap_or(0);
+                                            let max_tok = request_body
+                                                .get("max_tokens")
+                                                .and_then(|v| v.as_i64())
+                                                .unwrap_or(-1);
+                                            eprintln!(
+                                                "[bhumi][pre7.1] Worker {}: model={} messages={} tools={} max_tokens={} stream={}",
+                                                worker_id, model, msg_count, tools_len_dbg, max_tok, is_streaming_req
+                                            );
+                                        }
+                                        // Extra debug before send to catch stalls (avoid serializing whole body)
+                                        if debug_debug {
+                                            let tools_len = request_body
+                                                .get("tools")
+                                                .and_then(|t| t.as_array())
+                                                .map(|a| a.len())
+                                                .unwrap_or(0);
+                                            eprintln!(
+                                                "[bhumi][pre8] Worker {}: Sending request url={} stream={} tools={}",
+                                                worker_id, url, is_streaming_req, tools_len
+                                            );
+                                        }
+
+                                        // Send with a timeout guard to detect handshake stalls
+                                        if debug_debug { eprintln!("[bhumi][pre9] Worker {}: issuing POST ...", worker_id); }
+                                        let send_fut = client
+                                            .post(&url)
                                             .headers(headers)
                                             .json(&request_body)
-                                            .send()
-                                            .await
+                                            .send();
+                                        if debug_debug { eprintln!("[bhumi][pre10] Worker {}: awaiting send ...", worker_id); }
+                                        match tokio::time::timeout(std::time::Duration::from_secs(15), send_fut).await {
+                                            Ok(resp) => resp,
+                                            Err(_) => {
+                                                if debug {
+                                                    println!(
+                                                        "Worker {}: HTTP send timeout after 15s for url={}",
+                                                        worker_id, url
+                                                    );
+                                                }
+                                                // Surface as error to Python so callers don't hang
+                                                if is_streaming_req {
+                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                    chunks.push_back("{\"error\":\"timeout during send\"}".to_string());
+                                                    chunks.push_back("[DONE]".to_string());
+                                                } else {
+                                                    let _ = response_tx.try_send("{\"error\":\"timeout during send\"}".to_string());
+                                                }
+                                                // Decrement active and continue to next request
+                                                {
+                                                    let mut active = active_requests.write().await;
+                                                    *active -= 1;
+                                                }
+                                                continue;
+                                            }
+                                        }
                                     }
                                 };
 
@@ -306,12 +390,25 @@ impl BhumiCore {
                                             let mut event_data = String::new();
                                             // Track current SSE event type (e.g., content_block_delta)
                                             let mut current_event: Option<String> = None;
+                                            // Track if we enqueued any payload to Python side
+                                            let mut enqueued_any = false;
+                                            // Accumulate raw body for non-SSE fallback (providers that ignore SSE)
+                                            let mut raw_body = String::new();
 
-                                            while let Some(chunk_result) = stream.next().await {
-                                                if let Ok(bytes) = chunk_result {
+                                            // Read stream with idle timeout to prevent hangs
+                                            loop {
+                                                let next_item = tokio::time::timeout(
+                                                    std::time::Duration::from_secs(30),
+                                                    stream.next()
+                                                ).await;
+                                                match next_item {
+                                                    Ok(Some(chunk_result)) => {
+                                                        if let Ok(bytes) = chunk_result {
                                                     if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                                                         // Append to buffer and process complete lines
                                                         sse_buffer.push_str(&text);
+                                                        // Also accumulate raw body to support non-SSE fallback
+                                                        raw_body.push_str(&text);
 
                                                         loop {
                                                             // Find next newline (handle both \n and \r\n by trimming CR later)
@@ -336,11 +433,13 @@ impl BhumiCore {
                                                                                         if serde_json::from_str::<Value>(&payload).is_ok() {
                                                                                             let mut chunks = stream_chunks.lock().unwrap();
                                                                                             chunks.push_back(payload);
+                                                                                            enqueued_any = true;
                                                                                         } else {
                                                                                             for line_payload in payload.lines() {
                                                                                                 if serde_json::from_str::<Value>(line_payload).is_ok() {
                                                                                                     let mut chunks = stream_chunks.lock().unwrap();
                                                                                                     chunks.push_back(line_payload.to_string());
+                                                                                                    enqueued_any = true;
                                                                                                 }
                                                                                             }
                                                                                         }
@@ -358,6 +457,7 @@ impl BhumiCore {
                                                                             } else if !payload.is_empty() {
                                                                                 let mut chunks = stream_chunks.lock().unwrap();
                                                                                 chunks.push_back(payload);
+                                                                                enqueued_any = true;
                                                                             }
                                                                         }
                                                                         event_data.clear();
@@ -397,6 +497,7 @@ impl BhumiCore {
                                                                             } else if !payload.is_empty() {
                                                                                 let mut chunks = stream_chunks.lock().unwrap();
                                                                                 chunks.push_back(payload);
+                                                                                enqueued_any = true;
                                                                             }
                                                                         }
                                                                         event_data.clear();
@@ -427,6 +528,15 @@ impl BhumiCore {
                                                             break;
                                                         }
                                                     }
+                                                        }
+                                                    }
+                                                    Ok(None) => break,
+                                                    Err(_) => {
+                                                        if debug {
+                                                            println!("Worker {}: stream idle timeout after 30s", worker_id);
+                                                        }
+                                                        break;
+                                                    }
                                                 }
                                             }
                                             // Flush any pending event data at end of stream
@@ -439,11 +549,13 @@ impl BhumiCore {
                                                                 if serde_json::from_str::<Value>(&payload).is_ok() {
                                                                     let mut chunks = stream_chunks.lock().unwrap();
                                                                     chunks.push_back(payload);
+                                                                    enqueued_any = true;
                                                                 } else {
                                                                     for line_payload in payload.lines() {
                                                                         if serde_json::from_str::<Value>(line_payload).is_ok() {
                                                                             let mut chunks = stream_chunks.lock().unwrap();
                                                                             chunks.push_back(line_payload.to_string());
+                                                                            enqueued_any = true;
                                                                         }
                                                                     }
                                                                 }
@@ -454,10 +566,17 @@ impl BhumiCore {
                                                 } else if !payload.is_empty() {
                                                     let mut chunks = stream_chunks.lock().unwrap();
                                                     chunks.push_back(payload);
+                                                    enqueued_any = true;
                                                 }
                                             }
                                             // Ensure the Python reader will terminate even if provider omitted [DONE]
                                             if !saw_done {
+                                                // Fallback: if no SSE payloads were enqueued but we have a body, forward it once
+                                                if !enqueued_any && !raw_body.is_empty() {
+                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                    chunks.push_back(raw_body.clone());
+                                                    enqueued_any = true;
+                                                }
                                                 let mut chunks = stream_chunks.lock().unwrap();
                                                 chunks.push_back("[DONE]".to_string());
                                             }
@@ -488,7 +607,7 @@ impl BhumiCore {
                                     Err(_) => continue,
                                 };
                             } else {
-                                if debug {
+                                if debug_debug {
                                     println!("Worker {}: Request JSON: {:?}", worker_id, request_json);
                                     println!("Worker {}: Headers: {:?}", worker_id, request_json.get("_headers"));
                                 }
@@ -515,6 +634,7 @@ impl BhumiCore {
             max_concurrent,
             active_requests,
             debug,
+            debug_debug,
             client,
             stream_buffer_size,
             model: model.to_string(),

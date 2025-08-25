@@ -1,6 +1,7 @@
 import asyncio
 import os
 import dotenv
+import json
 from bhumi.base_client import BaseLLMClient, LLMConfig
 
 
@@ -11,20 +12,14 @@ async def main() -> None:
     api_key = os.environ.get("OPENAI_API_KEY") or "sk-placeholder"
 
     # OpenAI model that supports tool calling and streaming
-    cfg = LLMConfig(api_key=api_key, model="openai/gpt-4o-mini", debug=True)
-    client = BaseLLMClient(cfg, debug=True)
+    cfg = LLMConfig(api_key=api_key, model="openai/gpt-5")
+    client = BaseLLMClient(cfg)  # no debug noise
 
-    # Debug banner
-    model = cfg.model
-    provider = model.split("/")[0] if "/" in model else model
-    hybrid = os.environ.get("BHUMI_HYBRID_TOOLS", "0")
-    redacted = (api_key[:6] + "..." + api_key[-4:]) if api_key and len(api_key) >= 10 else "<none>"
-    print(f"[dbg] provider={provider} model={model} hybrid={hybrid} timeout={cfg.timeout} key=OPENAI_API_KEY={redacted}")
-
-    # Register a simple tool to demonstrate AFC-style streaming with tools
+    # Register a simple tool; print when it runs so users can see tool activity
     async def get_time(tz: str = "UTC") -> str:
-        # Replace with real logic if desired
-        return f"12:00 in {tz}"
+        result = f"12:00 in {tz}"
+        print(f"\nTool executed: get_time({tz}) -> {result}")
+        return result
 
     client.register_tool(
         name="get_time",
@@ -48,11 +43,34 @@ async def main() -> None:
         }
     ]
 
+    # Mirror example_tool_calling.py display style
+    print("\nStarting time query test (OpenAI + tools)...")
+    print(f"\nSending messages: {json.dumps(messages, indent=2)}")
+    print("\nOpenAI tool defs:")
+    try:
+        print(json.dumps(client.tool_registry.get_openai_definitions(), indent=2))
+    except Exception as e:
+        print(f"(could not get defs) {e}")
+
     stream = await client.completion(messages, stream=True)
-    print("--- Streaming output start (OpenAI + tools) ---")
+    print("\n--- Streaming output start ---")
+    chunks: list[str] = []
     async for chunk in stream:
-        print(chunk, end="", flush=True)
+        if chunk:
+            chunks.append(chunk)
+            print(chunk, end="", flush=True)
     print("\n--- Streaming output end ---")
+
+    final_text = "".join(chunks).strip()
+    if not final_text:
+        # Fallback: request a non-stream completion so we always show an answer
+        try:
+            resp = await client.completion(messages, stream=False)
+            final_text = (resp.get("text") if isinstance(resp, dict) else str(resp)) or ""
+        except Exception as e:
+            final_text = f"(no streamed text; fallback failed: {e})"
+
+    print(f"\nFinal: {final_text}\n")
 
 
 if __name__ == "__main__":

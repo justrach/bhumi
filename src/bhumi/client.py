@@ -4,6 +4,7 @@ from typing import List, Dict, Optional, Union, AsyncIterator, Any
 from dataclasses import dataclass
 import asyncio
 import time
+import os
 
 # Get the root module (the Rust implementation)
 import bhumi.bhumi as _rust
@@ -56,19 +57,29 @@ class AsyncLLMClient:
         max_concurrent: int = 30,
         provider: str = "gemini",
         model: str = "gemini-1.5-flash-8b",
-        debug: bool = False
+        debug: bool = False,
+        debug_debug: bool = False
     ):
+        # Resolve flags, honoring environment overrides
+        debug = debug
+        debug_debug = (
+            debug_debug
+            or (os.environ.get("BHUMI_DEBUG_DEBUG", "0") == "1")
+        )
+
         self._client = _rust.BhumiCore(
             max_concurrent=max_concurrent,
             provider=provider,
             model=model,
-            debug=debug
+            debug=debug,
+            debug_debug=debug_debug
         )
         self.provider = provider
         self.model = model
         self._response_queue = asyncio.Queue()
         self._response_task = None
         self.debug = debug  # Add debug flag
+        self.debug_debug = debug_debug
 
     async def _get_responses(self):
         """Background task to get responses from Rust"""
@@ -153,13 +164,15 @@ class GeminiClient(AsyncLLMClient):
         self,
         max_concurrent: int = 30,
         model: str = "gemini-1.5-flash-8b",
-        debug: bool = False
+        debug: bool = False,
+        debug_debug: bool = False
     ):
         super().__init__(
             max_concurrent=max_concurrent,
             provider="gemini",
             model=model,
-            debug=debug
+            debug=debug,
+            debug_debug=debug_debug
         )
 
 class AnthropicClient(AsyncLLMClient):
@@ -167,13 +180,15 @@ class AnthropicClient(AsyncLLMClient):
         self,
         max_concurrent: int = 30,
         model: str = "claude-3-haiku",
-        debug: bool = False
+        debug: bool = False,
+        debug_debug: bool = False
     ):
         super().__init__(
             max_concurrent=max_concurrent,
             provider="anthropic",
             model=model,
-            debug=debug
+            debug=debug,
+            debug_debug=debug_debug
         )
 
 class OpenAIClient(AsyncLLMClient):
@@ -181,13 +196,15 @@ class OpenAIClient(AsyncLLMClient):
         self,
         max_concurrent: int = 30,
         model: str = "gpt-4",
-        debug: bool = False
+        debug: bool = False,
+        debug_debug: bool = False
     ):
         super().__init__(
             max_concurrent=max_concurrent,
             provider="openai",
             model=model,
-            debug=debug
+            debug=debug,
+            debug_debug=debug_debug
         )
 
     async def acompletion(

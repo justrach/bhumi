@@ -27,6 +27,7 @@ class LLMConfig:
     timeout: float = 30.0
     headers: Optional[Dict[str, str]] = None
     debug: bool = False
+    debug_debug: bool = False
     max_tokens: Optional[int] = None  # Add max_tokens parameter
     extra_config: Dict[str, Any] = None
     buffer_size: int = 131072  # Back to 128KB for optimal performance
@@ -189,18 +190,26 @@ class BaseLLMClient:
         self,
         config: LLMConfig,
         max_concurrent: int = 10,
-        debug: bool = False
+        debug: bool = False,
+        debug_debug: bool = False
     ):
         self.config = config
         self.max_concurrent = max_concurrent
-        self.debug = debug
+        self.debug = debug or getattr(config, "debug", False) or (os.environ.get("BHUMI_DEBUG", "0") == "1")
+        # Super-verbose debug (gates noisy logs)
+        self.debug_debug = (
+            debug_debug
+            or getattr(config, "debug_debug", False)
+            or (os.environ.get("BHUMI_DEBUG_DEBUG", "0") == "1")
+        )
         
         # Create initial core
         self.core = _rust.BhumiCore(
             max_concurrent=max_concurrent,
             provider=config.provider or "generic",
             model=config.model,
-            debug=debug,
+            debug=self.debug,
+            debug_debug=self.debug_debug,
             base_url=config.base_url
         )
         
@@ -289,7 +298,7 @@ class BaseLLMClient:
         
         # Then handle each tool call
         for tool_call in tool_calls:
-            if debug:
+            if self.debug_debug:
                 print(f"\nProcessing tool call: {json_dumps(tool_call)}")
             
             # Create ToolCall object
@@ -301,13 +310,13 @@ class BaseLLMClient:
             
             try:
                 # Execute the tool
-                if debug:
+                if self.debug_debug:
                     print(f"\nExecuting tool: {call.function['name']}")
                     print(f"Arguments: {call.function['arguments']}")
                 
                 result = await self.tool_registry.execute_tool(call)
                 
-                if debug:
+                if self.debug_debug:
                     print(f"Tool execution result: {result}")
                 
                 # Add tool result to messages
@@ -319,11 +328,11 @@ class BaseLLMClient:
                 
                 messages.append(tool_message)
                 
-                if debug:
+                if self.debug_debug:
                     print(f"Added tool message: {json_dumps(tool_message)}")
                     
             except Exception as e:
-                if debug:
+                if self.debug_debug:
                     print(f"Error executing tool {call.function['name']}: {e}")
                 messages.append({
                     "role": "tool",
@@ -354,7 +363,7 @@ class BaseLLMClient:
             else:
                 tools = self.tool_registry.get_public_definitions()
             kwargs["tools"] = tools
-            if debug:
+            if self.debug_debug:
                 print(f"\nRegistered tools ({self.config.provider}): {json_dumps(tools)}")
             
         # Extract model name after provider
@@ -400,7 +409,13 @@ class BaseLLMClient:
             **kwargs
         }
         if req_max_tokens is not None:
-            request["max_tokens"] = req_max_tokens
+            # GPT-5 models expect 'max_completion_tokens' instead of 'max_tokens'
+            try:
+                is_gpt5 = bool(re.search(r"(?:^|/)gpt-5", model))
+            except Exception:
+                is_gpt5 = isinstance(model, str) and model.startswith("gpt-5")
+            token_field = "max_completion_tokens" if is_gpt5 else "max_tokens"
+            request[token_field] = req_max_tokens
         
         # Gemini now uses OpenAI-compatible chat/completions path; no special formatting.
         
@@ -415,7 +430,7 @@ class BaseLLMClient:
                 norm_msgs.append({"role": m.get("role", "user"), "content": content})
             request["messages"] = norm_msgs
 
-        if debug:
+        if self.debug_debug:
             print(f"\nSending request: {json_dumps(request)}")
         
         # Submit request
@@ -429,6 +444,69 @@ class BaseLLMClient:
                     
                     response_data = json_loads(response)
                     
+                    # Anthropic non-streaming AFC: detect tool_use blocks, execute, and continue
+                    if (
+                        (self.config.provider == "anthropic")
+                        and isinstance(response_data, dict)
+                        and isinstance(response_data.get("content"), list)
+                    ):
+                        content_blocks = response_data.get("content", [])
+                        tool_use_blocks = [b for b in content_blocks if isinstance(b, dict) and b.get("type") == "tool_use"]
+                        if tool_use_blocks:
+                            # Append the assistant tool_use message as-is
+                            messages.append({
+                                "role": "assistant",
+                                "content": content_blocks,
+                            })
+
+                            # Execute tools and build tool_result blocks
+                            tool_results: List[Dict[str, Any]] = []
+                            for tub in tool_use_blocks:
+                                call = ToolCall(
+                                    id=tub.get("id") or str(uuid.uuid4()),
+                                    type="function",
+                                    function={
+                                        "name": tub.get("name"),
+                                        "arguments": tub.get("input", {}),
+                                    },
+                                )
+                                try:
+                                    result = await self.tool_registry.execute_tool(call)
+                                    tool_results.append({
+                                        "type": "tool_result",
+                                        "tool_use_id": call.id,
+                                        "content": str(result),
+                                    })
+                                except Exception as e:
+                                    tool_results.append({
+                                        "type": "tool_result",
+                                        "tool_use_id": call.id,
+                                        "content": f"Error: {e}",
+                                    })
+
+                            # Continue conversation with tool results as user blocks
+                            messages.append({
+                                "role": "user",
+                                "content": tool_results,
+                            })
+
+                            # Re-normalize anthropic block schema and resubmit
+                            next_request = dict(request)
+                            norm_msgs: List[Dict[str, Any]] = []
+                            for m in messages:
+                                c = m.get("content", "")
+                                if isinstance(c, str):
+                                    c = [{"type": "text", "text": c}]
+                                norm_msgs.append({"role": m.get("role", "user"), "content": c})
+                            next_request["messages"] = norm_msgs
+                            if self.debug_debug:
+                                try:
+                                    print(f"\n[anthropic][non-stream AFC] resubmitting with tool_results: {json_dumps(tool_results)}")
+                                except Exception:
+                                    pass
+                            self.core._submit(json_dumps(next_request))
+                            continue
+
                     # Check for tool calls in response
                     if "tool_calls" in response_data.get("choices", [{}])[0].get("message", {}):
                         if debug:
@@ -440,7 +518,7 @@ class BaseLLMClient:
                         messages = await self._handle_tool_calls(messages, tool_calls, debug)
                         
                         # Continue conversation with tool results
-                        if debug:
+                        if self.debug_debug:
                             print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
                         
                         # Make a new request with the updated messages
@@ -472,7 +550,7 @@ class BaseLLMClient:
                                 messages = await self._handle_tool_calls(messages, tool_calls, debug)
                                 
                                 # Continue conversation with tool results
-                                if debug:
+                                if self.debug_debug:
                                     print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
                                 
                                 # Make a new request with the updated messages (OpenAI-compatible continuation)
@@ -503,7 +581,7 @@ class BaseLLMClient:
                             messages = await self._handle_tool_calls(messages, tool_calls, debug)
                             
                             # Continue conversation with tool results
-                            if debug:
+                            if self.debug_debug:
                                 print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
                             
                             # Make a new request with the updated messages
@@ -567,7 +645,7 @@ class BaseLLMClient:
                         message = response_data["choices"][0]["message"]
                         text = message.get("content")
                         
-                        if debug:
+                        if self.debug_debug:
                             print(f"\nFinal message: {json_dumps(message)}")
                         
                         return {
@@ -645,7 +723,7 @@ class BaseLLMClient:
             **kwargs,
         }
 
-        if self.debug:
+        if self.debug_debug:
             try:
                 print(f"\nSending image generation request: {json_dumps(request)[:1000]}...")
             except Exception:
@@ -696,6 +774,12 @@ class BaseLLMClient:
 
         if self.config.provider == "anthropic":
             headers = {"x-api-key": self.config.api_key}
+            # Determine token field for GPT-5
+            try:
+                is_gpt5_img = bool(re.search(r"(?:^|/)gpt-5", model))
+            except Exception:
+                is_gpt5_img = isinstance(model, str) and model.startswith("gpt-5")
+            token_field_img = "max_completion_tokens" if is_gpt5_img else "max_tokens"
             request: Dict[str, Any] = {
                 "_headers": headers,
                 "model": model,
@@ -711,7 +795,7 @@ class BaseLLMClient:
                         ],
                     }
                 ],
-                "max_tokens": max_tokens,
+                token_field_img: max_tokens,
             }
         elif self.config.provider in ("gemini", "openai"):
             # Always force OpenAI-compatible chat/completions with explicit endpoint override
@@ -731,27 +815,33 @@ class BaseLLMClient:
                 "https://generativelanguage.googleapis.com/v1beta/openai"
             )
             endpoint = f"{(self.config.base_url or default_base)}/chat/completions"
+            # Determine token field for GPT-5
+            try:
+                is_gpt5_img2 = bool(re.search(r"(?:^|/)gpt-5", model))
+            except Exception:
+                is_gpt5_img2 = isinstance(model, str) and model.startswith("gpt-5")
+            token_field_img2 = "max_completion_tokens" if is_gpt5_img2 else "max_tokens"
             request = {
                 "_headers": {"Authorization": f"Bearer {self.config.api_key}"},
                 "_endpoint": endpoint,
                 "model": model,
                 "messages": messages,
-                "max_tokens": max_tokens,
+                token_field_img2: max_tokens,
             }
         else:
             raise ValueError(f"analyze_image not supported for provider: {self.config.provider}")
 
-        if self.debug:
+        if self.debug_debug:
             try:
                 dbg = {k: v for k, v in request.items() if k != "_headers"}
                 print(f"\nSending image analysis request: {json_dumps(dbg)[:1000]}...")
             except Exception:
                 pass
-            if self.config.provider == "gemini":
-                try:
-                    print(f"Gemini analyze_image debug: prompt_len={len(prompt)}, b64_len={len(b64)}, mime={mime}")
-                except Exception:
-                    pass
+        if self.config.provider == "gemini":
+            try:
+                print(f"Gemini analyze_image debug: prompt_len={len(prompt)}, b64_len={len(b64)}, mime={mime}")
+            except Exception:
+                pass
 
         self.core._submit(json_dumps(request))
 
@@ -834,12 +924,19 @@ class BaseLLMClient:
             headers = {"Authorization": f"Bearer {self.config.api_key}"}
         
         # Prepare base streaming request
+        # Determine token field based on model (GPT-5 uses 'max_completion_tokens')
+        try:
+            is_gpt5_stream = bool(re.search(r"(?:^|/)gpt-5", model))
+        except Exception:
+            is_gpt5_stream = isinstance(model, str) and model.startswith("gpt-5")
+        token_field_stream = "max_completion_tokens" if is_gpt5_stream else "max_tokens"
+        req_max_tokens_stream = kwargs.pop("max_tokens", 1024)
         request = {
             "model": model,
             "messages": messages,
             "stream": True,
             "_headers": headers,
-            "max_tokens": kwargs.pop("max_tokens", 1024),
+            token_field_stream: req_max_tokens_stream,
             **kwargs
         }
 
@@ -887,12 +984,68 @@ class BaseLLMClient:
         while True:
             chunk = self.core._get_stream_chunk()
             if chunk == "[DONE]":
+                # Try to harvest a final non-stream response (common after tool-calls).
+                # Poll briefly because the core may enqueue it slightly after [DONE].
+                try:
+                    get_resp = getattr(self.core, "_get_response", None)
+                except Exception:
+                    get_resp = None
+                if callable(get_resp):
+                    harvest_start = asyncio.get_event_loop().time()
+                    while True:
+                        resp = get_resp()
+                        if resp:
+                            try:
+                                data = json_loads(resp)
+                                text_out = None
+                                if isinstance(data, dict) and "choices" in data:
+                                    text_out = (
+                                        data.get("choices", [{}])[0]
+                                        .get("message", {})
+                                        .get("content")
+                                    )
+                                elif isinstance(data, dict) and "candidates" in data:
+                                    try:
+                                        text_out = (
+                                            data["candidates"][0]
+                                            .get("content", {})
+                                            .get("parts", [{}])[0]
+                                            .get("text")
+                                        )
+                                    except Exception:
+                                        text_out = None
+                                if text_out:
+                                    if self.debug:
+                                        print("[bhumi] harvested final text after [DONE]")
+                                    yield text_out
+                                    break
+                                else:
+                                    # Unknown dict payload; yield raw
+                                    yield json_dumps(data)
+                                    break
+                            except Exception:
+                                # Non-JSON payload; yield raw response text
+                                yield str(resp)
+                                break
+                        # Timeout after ~2.0s of waiting
+                        if asyncio.get_event_loop().time() - harvest_start > 2.0:
+                            break
+                        await asyncio.sleep(0.01)
                 break
             if chunk:
                 # Process any chunk we receive
                 try:
                     # Try to parse as JSON first (for proper SSE format)
                     data = json_loads(chunk)
+                    # Surface provider error bodies that were forwarded via stream chunks
+                    if isinstance(data, dict) and data.get("error"):
+                        # OpenAI-style error object: {"error": {"message": "...", ...}}
+                        err = data.get("error")
+                        if isinstance(err, dict):
+                            msg = err.get("message") or json_dumps(err)
+                        else:
+                            msg = str(err)
+                        raise RuntimeError(f"Provider error during streaming: {msg}")
                     
                     # If provider returns a JSON primitive (string/number), yield it directly
                     # This happens for some providers when streaming simple tokens like digits.
@@ -905,6 +1058,23 @@ class BaseLLMClient:
                     if self.config.provider == "anthropic":
                         # Handle Anthropic's SSE format
                         evt_type = data.get("type")
+                        # Some providers may return a full non-SSE JSON message as a single chunk
+                        # e.g., {"type":"message","content":[{"type":"text","text":"..."}], ...}
+                        if not evt_type and isinstance(data, dict) and data.get("content"):
+                            try:
+                                parts = data.get("content") or []
+                                texts = []
+                                for p in parts:
+                                    if isinstance(p, dict) and p.get("type") == "text":
+                                        t = p.get("text")
+                                        if t:
+                                            texts.append(t)
+                                final_text = "".join(texts)
+                                if final_text:
+                                    yield final_text
+                                    break
+                            except Exception:
+                                pass
                         if evt_type == "content_block_start":
                             cb = data.get("content_block", {})
                             if cb.get("type") == "tool_use":
@@ -1009,6 +1179,13 @@ class BaseLLMClient:
                                         if "arguments" in fn and fn["arguments"]:
                                             # Accumulate JSON argument string fragments
                                             acc["function"]["arguments"] += fn["arguments"]
+                            else:
+                                # Non-delta JSON chunk (provider sent final full message mid-stream)
+                                msg = choice.get("message", {})
+                                # If this is a tool_call result, let finish_reason logic handle it below
+                                if isinstance(msg, dict) and msg.get("content"):
+                                    yield msg.get("content")
+                                    break
 
                             # Check for finish reason
                             finish_reason = choice.get("finish_reason")
@@ -1048,6 +1225,43 @@ class BaseLLMClient:
                                 # Continue conversation by resubmitting with updated messages
                                 next_request = dict(request)
                                 next_request["messages"] = running_messages
+                                # Force final answer phase: do not allow further tool calls
+                                # Keep tools present (some providers require tools when tool_choice is provided)
+                                next_request["tool_choice"] = "none"
+                                # For OpenAI, request a non-stream final round to ensure we get the full answer
+                                # without requiring environment flags.
+                                if self.config.provider in ("openai",):
+                                    next_request["stream"] = False
+                                    # Submit and harvest a single final response immediately
+                                    self.core._submit(json_dumps(next_request))
+                                    harvest_start = asyncio.get_event_loop().time()
+                                    while True:
+                                        _gr = getattr(self.core, "_get_response", None)
+                                        resp = _gr() if callable(_gr) else None
+                                        if resp:
+                                            try:
+                                                data = json_loads(resp)
+                                                text = None
+                                                if isinstance(data, dict) and "choices" in data:
+                                                    text = (
+                                                        data.get("choices", [{}])[0]
+                                                        .get("message", {})
+                                                        .get("content")
+                                                    )
+                                                if text:
+                                                    yield text
+                                                else:
+                                                    # Unknown dict payload; yield raw
+                                                    yield json_dumps(data)
+                                                break
+                                            except Exception:
+                                                # Non-JSON payload; yield raw response text
+                                                yield str(resp)
+                                                break
+                                        if asyncio.get_event_loop().time() - harvest_start > self.config.timeout:
+                                            raise TimeoutError("Final non-stream round timed out")
+                                        await asyncio.sleep(0.01)
+                                    break
 
                                 # Optional hybrid fallback for providers with unstable multi-round streams
                                 # Enable by setting BHUMI_HYBRID_TOOLS=1
@@ -1060,7 +1274,9 @@ class BaseLLMClient:
                                     # Read single final response, yield its text, and finish
                                     hybrid_start = asyncio.get_event_loop().time()
                                     while True:
-                                        resp = self.core._get_response()
+                                        # Guard for cores that may not implement _get_response (e.g., MockCore)
+                                        _gr = getattr(self.core, "_get_response", None)
+                                        resp = _gr() if callable(_gr) else None
                                         if resp:
                                             try:
                                                 data = json_loads(resp)
@@ -1118,20 +1334,57 @@ class BaseLLMClient:
                             chunk_count += 1
                         yield chunk
             # Check for any immediate non-stream error/response from core
-            resp = self.core._get_response()
-            if resp:
-                try:
-                    data = json_loads(resp)
-                    # Surface provider errors early
-                    if isinstance(data, dict) and data.get("error"):
-                        raise RuntimeError(f"Provider error during streaming: {data['error']}")
-                    # If it's a normal response, end streaming and return
-                    if self.debug:
-                        print(f"[bhumi] non-stream response received mid-stream, ending. chunks={chunk_count}")
-                    break
-                except Exception:
-                    # Unknown payload; surface as error text
-                    raise RuntimeError(f"Non-stream response during streaming: {resp}")
+            # Some test cores (e.g., MockCore) do not implement _get_response; guard accordingly.
+            get_resp = None
+            try:
+                get_resp = getattr(self.core, "_get_response", None)
+            except Exception:
+                get_resp = None
+            if callable(get_resp):
+                resp = get_resp()
+                if resp:
+                    try:
+                        data = json_loads(resp)
+                        # Surface provider errors early
+                        if isinstance(data, dict) and data.get("error"):
+                            raise RuntimeError(f"Provider error during streaming: {data['error']}")
+                        # If it's a normal response, try to extract final text and yield it
+                        text_out = None
+                        if isinstance(data, dict):
+                            if "choices" in data:
+                                text_out = (
+                                    data.get("choices", [{}])[0]
+                                    .get("message", {})
+                                    .get("content")
+                                )
+                            elif "candidates" in data:
+                                try:
+                                    text_out = (
+                                        data["candidates"][0]
+                                        .get("content", {})
+                                        .get("parts", [{}])[0]
+                                        .get("text")
+                                    )
+                                except Exception:
+                                    text_out = None
+                        if text_out:
+                            if self.debug:
+                                print(
+                                    f"[bhumi] non-stream response mid-stream -> yielding final text; chunks={chunk_count}"
+                                )
+                            yield text_out
+                        else:
+                            if self.debug:
+                                print(
+                                    f"[bhumi] non-stream response mid-stream with no extractable text; chunks={chunk_count}"
+                                )
+                        break
+                    except Exception:
+                        # Unknown payload; yield raw response text and end
+                        if self.debug:
+                            print("[bhumi] non-stream response mid-stream (unknown format); yielding raw text")
+                        yield str(resp)
+                        break
 
             # Timeout handling for stuck streams
             now = asyncio.get_event_loop().time()
