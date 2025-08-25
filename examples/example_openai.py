@@ -4,6 +4,8 @@ import os
 import dotenv
 
 dotenv.load_dotenv()
+os.environ["BHUMI_DEBUG"] = "0"
+os.environ["BHUMI_DEBUG_DEBUG"] = "0"
 
 api_key = os.getenv("OPENAI_API_KEY")
 
@@ -12,10 +14,10 @@ async def main():
     config = LLMConfig(
         api_key=api_key,
         model="openai/gpt-4o-mini",  # Provider prefix triggers OpenAI routing
-        debug=True
+        debug=False
     )
     
-    client = BaseLLMClient(config, debug=True)
+    client = BaseLLMClient(config)
     
     # Test completion
     response = await client.completion([

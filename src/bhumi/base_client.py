@@ -1189,7 +1189,7 @@ class BaseLLMClient:
 
                             # Check for finish reason
                             finish_reason = choice.get("finish_reason")
-                            if self.debug:
+                            if self.debug_debug:
                                 try:
                                     print(
                                         f"DEBUG stream: finish_reason={finish_reason} accum_keys={list(tool_accum.keys())} accum={json_dumps(tool_accum)}"
@@ -1225,43 +1225,6 @@ class BaseLLMClient:
                                 # Continue conversation by resubmitting with updated messages
                                 next_request = dict(request)
                                 next_request["messages"] = running_messages
-                                # Force final answer phase: do not allow further tool calls
-                                # Keep tools present (some providers require tools when tool_choice is provided)
-                                next_request["tool_choice"] = "none"
-                                # For OpenAI, request a non-stream final round to ensure we get the full answer
-                                # without requiring environment flags.
-                                if self.config.provider in ("openai",):
-                                    next_request["stream"] = False
-                                    # Submit and harvest a single final response immediately
-                                    self.core._submit(json_dumps(next_request))
-                                    harvest_start = asyncio.get_event_loop().time()
-                                    while True:
-                                        _gr = getattr(self.core, "_get_response", None)
-                                        resp = _gr() if callable(_gr) else None
-                                        if resp:
-                                            try:
-                                                data = json_loads(resp)
-                                                text = None
-                                                if isinstance(data, dict) and "choices" in data:
-                                                    text = (
-                                                        data.get("choices", [{}])[0]
-                                                        .get("message", {})
-                                                        .get("content")
-                                                    )
-                                                if text:
-                                                    yield text
-                                                else:
-                                                    # Unknown dict payload; yield raw
-                                                    yield json_dumps(data)
-                                                break
-                                            except Exception:
-                                                # Non-JSON payload; yield raw response text
-                                                yield str(resp)
-                                                break
-                                        if asyncio.get_event_loop().time() - harvest_start > self.config.timeout:
-                                            raise TimeoutError("Final non-stream round timed out")
-                                        await asyncio.sleep(0.01)
-                                    break
 
                                 # Optional hybrid fallback for providers with unstable multi-round streams
                                 # Enable by setting BHUMI_HYBRID_TOOLS=1

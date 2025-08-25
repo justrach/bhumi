@@ -4,22 +4,20 @@ import os
 import dotenv
 
 dotenv.load_dotenv()
-os.environ["BHUMI_DEBUG"] = "0"
-os.environ["BHUMI_DEBUG_DEBUG"] = "0"
 
-api_key = os.getenv("GROQ_API_KEY")
+api_key = os.getenv("CEREBRAS_API_KEY")
 
 async def main():
     # Configure for Groq
     config = LLMConfig(
         api_key=api_key,
-        model="groq/moonshotai/kimi-k2-instruct",
-        debug=False,
+        model="cerebras/qwen-3-235b-a22b-instruct-2507",
+        debug=True,
         max_retries=3,
         max_tokens=500
     )
     
-    client = BaseLLMClient(config)
+    client = BaseLLMClient(config, debug=False)
     
     # Test completion
     response = await client.completion([
