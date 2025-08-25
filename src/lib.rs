@@ -29,7 +29,7 @@ use std::sync::Mutex;
 use tokio::time::sleep;
 use std::time::Duration;
 use std::future::Future;
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use bytes;
 
 mod anthropic;
@@ -232,6 +232,15 @@ impl BhumiCore {
                                             HeaderValue::from_str("application/json").unwrap()
                                         );
 
+                                        // If streaming, explicitly accept event stream
+                                        if request_json
+                                            .get("stream")
+                                            .and_then(|s| s.as_bool())
+                                            .unwrap_or(false)
+                                        {
+                                            headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+                                        }
+
                                         // Remove _headers from request before sending
                                         let mut request_body = request_json.clone();
                                         request_body.as_object_mut().map(|obj| {
@@ -257,48 +266,200 @@ impl BhumiCore {
 
                                 let _response: Result<(), reqwest::Error> = match response {
                                     Ok(resp) => {
-                                        if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
+                                        // Capture status first (resp.text() consumes resp)
+                                        let status = resp.status();
+                                        // Log HTTP status in debug mode
+                                        if debug {
+                                            println!(
+                                                "Worker {}: HTTP status {}",
+                                                worker_id,
+                                                status
+                                            );
+                                        }
+
+                                        // If non-success, forward body immediately and terminate stream
+                                        if !status.is_success() {
+                                            match resp.text().await {
+                                                Ok(body) => {
+                                                    if !body.is_empty() {
+                                                        let mut chunks = stream_chunks.lock().unwrap();
+                                                        chunks.push_back(body);
+                                                    } else {
+                                                        let mut chunks = stream_chunks.lock().unwrap();
+                                                        chunks.push_back(format!("{{\"error\":\"HTTP {}\"}}", status));
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                    chunks.push_back(format!("{{\"error\":\"HTTP {} (no body)\"}}", status));
+                                                }
+                                            }
+                                            let mut chunks = stream_chunks.lock().unwrap();
+                                            chunks.push_back("[DONE]".to_string());
+                                        } else if request_json.get("stream").and_then(|s| s.as_bool()).unwrap_or(false) {
                                             let stream = resp.bytes_stream();
                                             tokio::pin!(stream);
-                                            
+                                            let mut saw_done = false;
+                                            // Buffer for incomplete SSE lines spanning multiple chunks
+                                            let mut sse_buffer = String::new();
+                                            // Accumulator for multi-line SSE data payloads per event
+                                            let mut event_data = String::new();
+                                            // Track current SSE event type (e.g., content_block_delta)
+                                            let mut current_event: Option<String> = None;
+
                                             while let Some(chunk_result) = stream.next().await {
                                                 if let Ok(bytes) = chunk_result {
                                                     if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                                                        for line in text.lines() {
-                                                            if !line.is_empty() {
-                                                                if provider == "anthropic" {
-                                                                    // For Anthropic, forward the SSE data directly
-                                                                    if line.starts_with("data: ") {
-                                                                        let mut chunks = stream_chunks.lock().unwrap();
-                                                                        chunks.push_back(line.trim_start_matches("data: ").to_string());
-                                                                    }
-                                                                } else {
-                                                                    // For OpenAI and others
-                                                                    if line.starts_with("data: ") {
-                                                                        let data = line.trim_start_matches("data: ");
-                                                                        if data == "[DONE]" {
-                                                                            let mut chunks = stream_chunks.lock().unwrap();
-                                                                            chunks.push_back("[DONE]".to_string());
-                                                                            break;
-                                                                        }
-                                                                        if let Ok(json) = serde_json::from_str::<Value>(data) {
-                                                                            if let Some(content) = json
-                                                                                .get("choices")
-                                                                                .and_then(|c| c.get(0))
-                                                                                .and_then(|c| c.get("delta"))
-                                                                                .and_then(|d| d.get("content"))
-                                                                                .and_then(|c| c.as_str()) 
-                                                                            {
-                                                                                let mut chunks = stream_chunks.lock().unwrap();
-                                                                                chunks.push_back(content.to_string());
+                                                        // Append to buffer and process complete lines
+                                                        sse_buffer.push_str(&text);
+
+                                                        loop {
+                                                            // Find next newline (handle both \n and \r\n by trimming CR later)
+                                                            if let Some(pos) = sse_buffer.find('\n') {
+                                                                let mut line = sse_buffer[..pos].to_string();
+                                                                // Drain processed part including the newline
+                                                                sse_buffer.drain(..=pos);
+                                                                // Trim a trailing CR if present (\r\n)
+                                                                if line.ends_with('\r') {
+                                                                    line.pop();
+                                                                }
+                                                                // SSE event delimiter: empty line flushes accumulated data
+                                                                if line.is_empty() {
+                                                                    if !event_data.is_empty() {
+                                                                        let payload = event_data.trim_end_matches('\n').to_string();
+                                                                        if provider == "anthropic" {
+                                                                            if let Some(ev) = current_event.as_deref() {
+                                                                                match ev {
+                                                                                    // Forward only relevant Anthropic events to Python
+                                                                                    "content_block_delta" | "message_delta" | "content_block_stop" | "message_stop" => {
+                                                                                        // Ensure payload is valid JSON; if concatenated, split and push only valid JSON lines
+                                                                                        if serde_json::from_str::<Value>(&payload).is_ok() {
+                                                                                            let mut chunks = stream_chunks.lock().unwrap();
+                                                                                            chunks.push_back(payload);
+                                                                                        } else {
+                                                                                            for line_payload in payload.lines() {
+                                                                                                if serde_json::from_str::<Value>(line_payload).is_ok() {
+                                                                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                                                                    chunks.push_back(line_payload.to_string());
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                    _ => { /* ignore other events like message_start */ }
+                                                                                }
                                                                             }
+                                                                        } else {
+                                                                            if payload == "[DONE]" {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back("[DONE]".to_string());
+                                                                                saw_done = true;
+                                                                                // Break inner loop; outer loop will observe saw_done
+                                                                                break;
+                                                                            } else if !payload.is_empty() {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back(payload);
+                                                                            }
+                                                                        }
+                                                                        event_data.clear();
+                                                                    }
+                                                                    continue;
+                                                                }
+
+                                                                // If a new event header starts and we have pending data, flush previous event first
+                                                                if line.starts_with("event:") {
+                                                                    if !event_data.is_empty() {
+                                                                        let payload = event_data.trim_end_matches('\n').to_string();
+                                                                        if provider == "anthropic" {
+                                                                            if let Some(ev) = current_event.as_deref() {
+                                                                                match ev {
+                                                                                    "content_block_delta" | "message_delta" | "content_block_stop" | "message_stop" => {
+                                                                                        if serde_json::from_str::<Value>(&payload).is_ok() {
+                                                                                            let mut chunks = stream_chunks.lock().unwrap();
+                                                                                            chunks.push_back(payload);
+                                                                                        } else {
+                                                                                            for line_payload in payload.lines() {
+                                                                                                if serde_json::from_str::<Value>(line_payload).is_ok() {
+                                                                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                                                                    chunks.push_back(line_payload.to_string());
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                    _ => { /* ignore */ }
+                                                                                }
+                                                                            }
+                                                                        } else {
+                                                                            if payload == "[DONE]" {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back("[DONE]".to_string());
+                                                                                saw_done = true;
+                                                                                break;
+                                                                            } else if !payload.is_empty() {
+                                                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                                                chunks.push_back(payload);
+                                                                            }
+                                                                        }
+                                                                        event_data.clear();
+                                                                    }
+                                                                    // Update current event; do not enqueue the event header itself
+                                                                    let ev = line.trim_start_matches("event:").trim();
+                                                                    current_event = if ev.is_empty() { None } else { Some(ev.to_string()) };
+                                                                    continue;
+                                                                }
+
+                                                                // Accumulate only data lines; ignore other SSE fields (id:, retry:) and comments
+                                                                if line.starts_with("data: ") {
+                                                                    let data_part = line.trim_start_matches("data: ");
+                                                                    event_data.push_str(data_part);
+                                                                    event_data.push('\n');
+                                                                } else {
+                                                                    // Ignore non-data lines for robustness
+                                                                    continue;
+                                                                }
+                                                            } else {
+                                                                // No complete line yet; wait for more bytes
+                                                                break;
+                                                            }
+                                                        }
+
+                                                        // If we saw [DONE], stop reading further
+                                                        if saw_done {
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            // Flush any pending event data at end of stream
+                                            if !event_data.is_empty() && !saw_done {
+                                                let payload = event_data.trim_end_matches('\n').to_string();
+                                                if provider == "anthropic" {
+                                                    if let Some(ev) = current_event.as_deref() {
+                                                        match ev {
+                                                            "content_block_delta" | "message_delta" | "content_block_stop" | "message_stop" => {
+                                                                if serde_json::from_str::<Value>(&payload).is_ok() {
+                                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                                    chunks.push_back(payload);
+                                                                } else {
+                                                                    for line_payload in payload.lines() {
+                                                                        if serde_json::from_str::<Value>(line_payload).is_ok() {
+                                                                            let mut chunks = stream_chunks.lock().unwrap();
+                                                                            chunks.push_back(line_payload.to_string());
                                                                         }
                                                                     }
                                                                 }
                                                             }
+                                                            _ => {}
                                                         }
                                                     }
+                                                } else if !payload.is_empty() {
+                                                    let mut chunks = stream_chunks.lock().unwrap();
+                                                    chunks.push_back(payload);
                                                 }
+                                            }
+                                            // Ensure the Python reader will terminate even if provider omitted [DONE]
+                                            if !saw_done {
+                                                let mut chunks = stream_chunks.lock().unwrap();
+                                                chunks.push_back("[DONE]".to_string());
                                             }
                                         } else {
                                             // For non-streaming responses, buffer the entire response
@@ -338,11 +499,10 @@ impl BhumiCore {
                                 println!("Worker {}: Failed to parse request: {}", worker_id, request_str);
                             }
                         }
-                    }
-
-                    {
-                        let mut active = active_requests.write().await;
-                        *active -= 1;
+                        {
+                            let mut active = active_requests.write().await;
+                            *active -= 1;
+                        }
                     }
                 }
             });

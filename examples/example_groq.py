@@ -11,7 +11,7 @@ async def main():
     # Configure for Groq
     config = LLMConfig(
         api_key=api_key,
-        model="groq/mixtral-8x7b-32768",
+        model="groq/moonshotai/kimi-k2-instruct",
         debug=True,
         max_retries=3,
         max_tokens=500

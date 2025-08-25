@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Union, AsyncIterator, Any, Callable, Type, get_type_hints
 from .utils import async_retry, extract_json_from_text, parse_json_loosely
+from .json_compat import loads as json_loads, dumps as json_dumps, JSONDecodeError
 import bhumi.bhumi as _rust
-import json
 import asyncio
 import os
 import base64
@@ -73,7 +73,7 @@ def parse_streaming_chunk(chunk: str, provider: str) -> str:
                     continue
                     
                 try:
-                    data = json.loads(data_str)
+                    data = json_loads(data_str)
                     
                     # Extract content based on provider format
                     if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini', 'cerebras']:
@@ -86,7 +86,7 @@ def parse_streaming_chunk(chunk: str, provider: str) -> str:
                         # Anthropic format (different streaming format)
                         if 'delta' in data and 'text' in data['delta']:
                             content_parts.append(data['delta']['text'])
-                except json.JSONDecodeError:
+                except JSONDecodeError:
                     # If not JSON, might be plain text chunk
                     if data_str.strip():
                         content_parts.append(data_str)
@@ -164,9 +164,9 @@ class StructuredOutput:
         """Parse LLM response into structured output"""
         # Strict JSON first
         try:
-            data = json.loads(response)
+            data = json_loads(response)
             return self.output_type.model_validate(data)
-        except json.JSONDecodeError:
+        except JSONDecodeError:
             pass
 
         # Loose extraction from text
@@ -236,10 +236,20 @@ class BaseLLMClient:
         name: str,
         func: Callable,
         description: str,
-        parameters: Dict[str, Any]
+        parameters: Dict[str, Any],
+        *,
+        aliases: Optional[Dict[str, str]] = None,
+        on_unknown: str = "drop",
     ) -> None:
         """Register a new tool that can be called by the model"""
-        self.tool_registry.register(name, func, description, parameters)
+        self.tool_registry.register(
+            name=name,
+            func=func,
+            description=description,
+            parameters=parameters,
+            aliases=aliases,
+            on_unknown=on_unknown,
+        )
 
     def set_structured_output(self, model: Type[BaseModel]) -> None:
         """Set up structured output handling with a Pydantic model"""
@@ -280,7 +290,7 @@ class BaseLLMClient:
         # Then handle each tool call
         for tool_call in tool_calls:
             if debug:
-                print(f"\nProcessing tool call: {json.dumps(tool_call, indent=2)}")
+                print(f"\nProcessing tool call: {json_dumps(tool_call)}")
             
             # Create ToolCall object
             call = ToolCall(
@@ -310,7 +320,7 @@ class BaseLLMClient:
                 messages.append(tool_message)
                 
                 if debug:
-                    print(f"Added tool message: {json.dumps(tool_message, indent=2)}")
+                    print(f"Added tool message: {json_dumps(tool_message)}")
                     
             except Exception as e:
                 if debug:
@@ -345,7 +355,7 @@ class BaseLLMClient:
                 tools = self.tool_registry.get_public_definitions()
             kwargs["tools"] = tools
             if debug:
-                print(f"\nRegistered tools ({self.config.provider}): {json.dumps(tools, indent=2)}")
+                print(f"\nRegistered tools ({self.config.provider}): {json_dumps(tools)}")
             
         # Extract model name after provider
         # Foundation model providers (openai, anthropic, gemini) use simple provider/model format
@@ -365,7 +375,8 @@ class BaseLLMClient:
         # Prepare headers based on provider
         if self.config.provider == "anthropic":
             headers = {
-                "x-api-key": self.config.api_key
+                "x-api-key": self.config.api_key,
+                "anthropic-version": "2023-06-01",
             }
         else:
             headers = {
@@ -405,10 +416,10 @@ class BaseLLMClient:
             request["messages"] = norm_msgs
 
         if debug:
-            print(f"\nSending request: {json.dumps(request, indent=2)}")
+            print(f"\nSending request: {json_dumps(request)}")
         
         # Submit request
-        self.core._submit(json.dumps(request))
+        self.core._submit(json_dumps(request))
         
         while True:
             if response := self.core._get_response():
@@ -416,7 +427,7 @@ class BaseLLMClient:
                     if debug:
                         print(f"\nRaw response: {response}")
                     
-                    response_data = json.loads(response)
+                    response_data = json_loads(response)
                     
                     # Check for tool calls in response
                     if "tool_calls" in response_data.get("choices", [{}])[0].get("message", {}):
@@ -430,11 +441,11 @@ class BaseLLMClient:
                         
                         # Continue conversation with tool results
                         if debug:
-                            print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
+                            print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
                         
                         # Make a new request with the updated messages
                         request["messages"] = messages
-                        self.core._submit(json.dumps(request))
+                        self.core._submit(json_dumps(request))
                         continue
                     
                     # For Gemini responses
@@ -462,11 +473,11 @@ class BaseLLMClient:
                                 
                                 # Continue conversation with tool results
                                 if debug:
-                                    print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
+                                    print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
                                 
                                 # Make a new request with the updated messages (OpenAI-compatible continuation)
                                 request["messages"] = messages
-                                self.core._submit(json.dumps(request))
+                                self.core._submit(json_dumps(request))
                                 continue
                             
                             # Handle regular response
@@ -493,24 +504,24 @@ class BaseLLMClient:
                             
                             # Continue conversation with tool results
                             if debug:
-                                print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
+                                print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
                             
                             # Make a new request with the updated messages
                             request["messages"] = messages
-                            self.core._submit(json.dumps(request))
+                            self.core._submit(json_dumps(request))
                             continue
                         
                         # Extract function call from content if present
                         function_match = re.search(r'<function-call>(.*?)</function-call>', content, re.DOTALL)
                         if function_match:
                             try:
-                                function_data = json.loads(function_match.group(1).strip())
+                                function_data = json_loads(function_match.group(1).strip())
                                 tool_calls = [{
                                     "id": str(uuid.uuid4()),
                                     "type": "function",
                                     "function": {
                                         "name": function_data["name"],
-                                        "arguments": json.dumps(function_data["arguments"])
+                                        "arguments": json_dumps(function_data["arguments"])
                                     }
                                 }]
                                 
@@ -519,13 +530,13 @@ class BaseLLMClient:
                                 
                                 # Continue conversation with tool results
                                 if debug:
-                                    print(f"\nContinuing conversation with updated messages: {json.dumps(messages, indent=2)}")
+                                    print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
                                 
                                 # Make a new request with the updated messages
                                 request["messages"] = messages
-                                self.core._submit(json.dumps(request))
+                                self.core._submit(json_dumps(request))
                                 continue
-                            except json.JSONDecodeError as e:
+                            except JSONDecodeError as e:
                                 if debug:
                                     print(f"Error parsing function call JSON: {e}")
                         
@@ -557,7 +568,7 @@ class BaseLLMClient:
                         text = message.get("content")
                         
                         if debug:
-                            print(f"\nFinal message: {json.dumps(message, indent=2)}")
+                            print(f"\nFinal message: {json_dumps(message)}")
                         
                         return {
                             "text": text or str(response_data),
@@ -635,15 +646,18 @@ class BaseLLMClient:
         }
 
         if self.debug:
-            print(f"\nSending image generation request: {json.dumps(request, indent=2)[:1000]}...")
+            try:
+                print(f"\nSending image generation request: {json_dumps(request)[:1000]}...")
+            except Exception:
+                pass
 
-        self.core._submit(json.dumps(request))
+        self.core._submit(json_dumps(request))
 
         start = asyncio.get_event_loop().time()
         while True:
             if response := self.core._get_response():
                 try:
-                    return json.loads(response)
+                    return json_loads(response)
                 except Exception:
                     return {"raw": response}
             if asyncio.get_event_loop().time() - start > self.config.timeout:
@@ -730,7 +744,7 @@ class BaseLLMClient:
         if self.debug:
             try:
                 dbg = {k: v for k, v in request.items() if k != "_headers"}
-                print(f"\nSending image analysis request: {json.dumps(dbg, indent=2)[:1000]}...")
+                print(f"\nSending image analysis request: {json_dumps(dbg)[:1000]}...")
             except Exception:
                 pass
             if self.config.provider == "gemini":
@@ -739,13 +753,13 @@ class BaseLLMClient:
                 except Exception:
                     pass
 
-        self.core._submit(json.dumps(request))
+        self.core._submit(json_dumps(request))
 
         start = asyncio.get_event_loop().time()
         while True:
             if response := self.core._get_response():
                 try:
-                    data = json.loads(response)
+                    data = json_loads(response)
                 except Exception:
                     return {"raw_response": response}
 
@@ -810,10 +824,16 @@ class BaseLLMClient:
         else:
             model = self.config.model
         
-        headers = {
-            "x-api-key": self.config.api_key if self.config.provider == "anthropic" else f"Bearer {self.config.api_key}"
-        }
+        # Prepare headers consistent with non-streaming path
+        if self.config.provider == "anthropic":
+            headers = {
+                "x-api-key": self.config.api_key,
+                "anthropic-version": "2023-06-01",
+            }
+        else:
+            headers = {"Authorization": f"Bearer {self.config.api_key}"}
         
+        # Prepare base streaming request
         request = {
             "model": model,
             "messages": messages,
@@ -822,11 +842,47 @@ class BaseLLMClient:
             "max_tokens": kwargs.pop("max_tokens", 1024),
             **kwargs
         }
+
+        # Normalize Anthropics messages to block schema (same as non-streaming)
+        if self.config.provider == "anthropic":
+            norm_msgs: List[Dict[str, Any]] = []
+            for m in request.get("messages", []):
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    content = [{"type": "text", "text": content}]
+                norm_msgs.append({"role": m.get("role", "user"), "content": content})
+            request["messages"] = norm_msgs
+        
+        # Add tools if any are registered
+        public_tools = self.tool_registry.get_public_definitions()
+        if public_tools:
+            if self.config.provider == "anthropic":
+                request["tools"] = self.tool_registry.get_anthropic_definitions()
+            else:
+                request["tools"] = public_tools
         
         if self.debug:
             print(f"Sending streaming request for {self.config.provider}")
         
-        self.core._submit(json.dumps(request))
+        # Local copy of messages that we will mutate when handling tool calls
+        running_messages = list(messages)
+
+        # Function-call accumulation for OpenAI-compatible streaming
+        tool_accum: Dict[int, Dict[str, Any]] = {}
+        # Anthropic tool_use accumulation during streaming
+        anthropic_tools: Dict[int, Dict[str, Any]] = {}
+        # Debug state
+        round_idx = 1
+        chunk_count = 0
+
+        if self.debug:
+            try:
+                print(f"[bhumi] submit stream round={round_idx} provider={self.config.provider} model={model}")
+                print(f"[bhumi] tools_registered={bool(public_tools)} timeout={self.config.timeout}")
+            except Exception:
+                pass
+        self.core._submit(json_dumps(request))
+        start = asyncio.get_event_loop().time()
         
         while True:
             chunk = self.core._get_stream_chunk()
@@ -836,20 +892,95 @@ class BaseLLMClient:
                 # Process any chunk we receive
                 try:
                     # Try to parse as JSON first (for proper SSE format)
-                    data = json.loads(chunk)
+                    data = json_loads(chunk)
                     
-                    # Skip if data is not a dictionary
+                    # If provider returns a JSON primitive (string/number), yield it directly
+                    # This happens for some providers when streaming simple tokens like digits.
                     if not isinstance(data, dict):
+                        text = str(data)
+                        if text:
+                            yield text
                         continue
                         
                     if self.config.provider == "anthropic":
                         # Handle Anthropic's SSE format
-                        if data.get("type") == "content_block_delta":
+                        evt_type = data.get("type")
+                        if evt_type == "content_block_start":
+                            cb = data.get("content_block", {})
+                            if cb.get("type") == "tool_use":
+                                idx = data.get("index", 0)
+                                anthropic_tools[idx] = {
+                                    "id": cb.get("id") or str(uuid.uuid4()),
+                                    "type": "function",
+                                    "function": {"name": cb.get("name", ""), "arguments": ""},
+                                }
+                        elif evt_type == "content_block_delta":
                             delta = data.get("delta", {})
                             if delta.get("type") == "text_delta":
-                                yield delta.get("text", "")
-                        elif data.get("type") == "message_stop":
-                            break
+                                text_piece = delta.get("text", "")
+                                if text_piece:
+                                    if self.debug:
+                                        chunk_count += 1
+                                    yield text_piece
+                            elif delta.get("type") == "input_json_delta":
+                                idx = data.get("index", 0)
+                                acc = anthropic_tools.setdefault(idx, {"function": {"arguments": ""}})
+                                acc_fn = acc.setdefault("function", {"name": "", "arguments": ""})
+                                acc_fn["arguments"] += delta.get("partial_json", "")
+                        elif evt_type == "message_stop":
+                            # If we accumulated tool_use calls, execute and continue conversation
+                            if anthropic_tools:
+                                tool_calls_list = []
+                                for idx in sorted(anthropic_tools.keys()):
+                                    tc = anthropic_tools[idx]
+                                    # Fallback to empty JSON if arguments are missing
+                                    if not tc.get("function", {}).get("arguments"):
+                                        tc["function"]["arguments"] = "{}"
+                                    tool_calls_list.append(tc)
+
+                                # Execute tools and build Anthropic tool_result message
+                                tool_results = []
+                                for tc in tool_calls_list:
+                                    call = ToolCall(
+                                        id=tc.get("id") or str(uuid.uuid4()),
+                                        type=tc.get("type", "function"),
+                                        function=tc.get("function", {}),
+                                    )
+                                    try:
+                                        result = await self.tool_registry.execute_tool(call)
+                                        tool_results.append({
+                                            "type": "tool_result",
+                                            "tool_use_id": call.id,
+                                            "content": str(result),
+                                        })
+                                    except Exception as e:
+                                        tool_results.append({
+                                            "type": "tool_result",
+                                            "tool_use_id": call.id,
+                                            "content": f"Error: {e}",
+                                        })
+
+                                # Append as a user message with tool_result blocks
+                                running_messages.append({
+                                    "role": "user",
+                                    "content": tool_results,
+                                })
+
+                                # Reset accumulators and continue with updated messages
+                                anthropic_tools = {}
+                                next_request = dict(request)
+                                # Re-normalize anthropic message blocks for continuation
+                                norm_msgs: List[Dict[str, Any]] = []
+                                for m in running_messages:
+                                    content = m.get("content", "")
+                                    if isinstance(content, str):
+                                        content = [{"type": "text", "text": content}]
+                                    norm_msgs.append({"role": m.get("role", "user"), "content": content})
+                                next_request["messages"] = norm_msgs
+                                self.core._submit(json_dumps(next_request))
+                                continue
+                            else:
+                                break
                     # Gemini uses OpenAI-compatible SSE via the /openai path; handle in the default branch.
                     else:
                         # Handle OpenAI-compatible providers (OpenAI, Groq, OpenRouter, SambaNova)
@@ -857,30 +988,153 @@ class BaseLLMClient:
                             choice = data["choices"][0]
                             if "delta" in choice:
                                 delta = choice["delta"]
+                                # 1) Content deltas
                                 if "content" in delta and delta["content"]:
                                     yield delta["content"]
-                            
+                                # 2) Tool call deltas
+                                if "tool_calls" in delta and isinstance(delta["tool_calls"], list):
+                                    for item in delta["tool_calls"]:
+                                        idx = item.get("index", 0)
+                                        acc = tool_accum.setdefault(
+                                            idx,
+                                            {
+                                                "id": item.get("id"),
+                                                "type": item.get("type", "function"),
+                                                "function": {"name": "", "arguments": ""},
+                                            },
+                                        )
+                                        fn = item.get("function") or {}
+                                        if "name" in fn and fn["name"]:
+                                            acc["function"]["name"] = fn["name"]
+                                        if "arguments" in fn and fn["arguments"]:
+                                            # Accumulate JSON argument string fragments
+                                            acc["function"]["arguments"] += fn["arguments"]
+
                             # Check for finish reason
-                            if choice.get("finish_reason"):
+                            finish_reason = choice.get("finish_reason")
+                            if self.debug:
+                                try:
+                                    print(
+                                        f"DEBUG stream: finish_reason={finish_reason} accum_keys={list(tool_accum.keys())} accum={json_dumps(tool_accum)}"
+                                    )
+                                except Exception:
+                                    print(
+                                        f"DEBUG stream: finish_reason={finish_reason} accum_keys={list(tool_accum.keys())}"
+                                    )
+                            if finish_reason == "tool_calls":
+                                # Execute accumulated tools, then continue streaming with updated messages
+                                tool_calls_list = []
+                                for idx in sorted(tool_accum.keys()):
+                                    tc = tool_accum[idx]
+                                    tool_calls_list.append(
+                                        {
+                                            "id": tc.get("id") or str(uuid.uuid4()),
+                                            "type": tc.get("type", "function"),
+                                            "function": {
+                                                "name": tc.get("function", {}).get("name"),
+                                                "arguments": tc.get("function", {}).get("arguments", "{}"),
+                                            },
+                                        }
+                                    )
+
+                                # Handle tool calls (executes and appends tool results)
+                                running_messages = await self._handle_tool_calls(
+                                    running_messages, tool_calls_list, debug=self.debug
+                                )
+
+                                # Reset accumulators for next round
+                                tool_accum = {}
+
+                                # Continue conversation by resubmitting with updated messages
+                                next_request = dict(request)
+                                next_request["messages"] = running_messages
+
+                                # Optional hybrid fallback for providers with unstable multi-round streams
+                                # Enable by setting BHUMI_HYBRID_TOOLS=1
+                                use_hybrid = os.environ.get("BHUMI_HYBRID_TOOLS", "0") == "1"
+                                if use_hybrid and self.config.provider in ("openai",):
+                                    if self.debug:
+                                        print("[bhumi] tool_calls finish -> using hybrid non-stream round")
+                                    next_request["stream"] = False
+                                    self.core._submit(json_dumps(next_request))
+                                    # Read single final response, yield its text, and finish
+                                    hybrid_start = asyncio.get_event_loop().time()
+                                    while True:
+                                        resp = self.core._get_response()
+                                        if resp:
+                                            try:
+                                                data = json_loads(resp)
+                                                text = None
+                                                if isinstance(data, dict) and "choices" in data:
+                                                    text = (
+                                                        data.get("choices", [{}])[0]
+                                                        .get("message", {})
+                                                        .get("content")
+                                                    )
+                                                if text:
+                                                    yield text
+                                                break
+                                            except Exception:
+                                                yield str(resp)
+                                                break
+                                        if asyncio.get_event_loop().time() - hybrid_start > self.config.timeout:
+                                            raise TimeoutError("Hybrid tools round timed out")
+                                        await asyncio.sleep(0.01)
+                                    break
+                                else:
+                                    # Continue streaming normally (AFC-style)
+                                    round_idx += 1
+                                    if self.debug:
+                                        print(f"[bhumi] tool_calls finish -> submit stream round={round_idx}")
+                                    self.core._submit(json_dumps(next_request))
+                                    # Continue loop to process next streaming round
+                                    continue
+                            elif finish_reason:
                                 break
-                except json.JSONDecodeError:
+                except JSONDecodeError:
                     # If not JSON, check for SSE format
                     if chunk.startswith("data: "):
                         data = chunk.removeprefix("data: ")
                         if data != "[DONE]":
                             try:
-                                parsed = json.loads(data)
+                                parsed = json_loads(data)
                                 if isinstance(parsed, dict) and "choices" in parsed:
                                     content = (parsed.get("choices", [{}])[0]
                                              .get("delta", {})
                                              .get("content"))
                                     if content:
+                                        if self.debug:
+                                            chunk_count += 1
                                         yield content
-                            except json.JSONDecodeError:
+                            except JSONDecodeError:
                                 # Raw SSE data that's not JSON
                                 if data.strip():
+                                    if self.debug:
+                                        chunk_count += 1
                                     yield data
                     else:
                         # Raw text chunk - yield directly (this handles the case we're seeing)
+                        if self.debug:
+                            chunk_count += 1
                         yield chunk
+            # Check for any immediate non-stream error/response from core
+            resp = self.core._get_response()
+            if resp:
+                try:
+                    data = json_loads(resp)
+                    # Surface provider errors early
+                    if isinstance(data, dict) and data.get("error"):
+                        raise RuntimeError(f"Provider error during streaming: {data['error']}")
+                    # If it's a normal response, end streaming and return
+                    if self.debug:
+                        print(f"[bhumi] non-stream response received mid-stream, ending. chunks={chunk_count}")
+                    break
+                except Exception:
+                    # Unknown payload; surface as error text
+                    raise RuntimeError(f"Non-stream response during streaming: {resp}")
+
+            # Timeout handling for stuck streams
+            now = asyncio.get_event_loop().time()
+            if now - start > self.config.timeout:
+                raise TimeoutError(f"Streaming timed out after {self.config.timeout} seconds for provider {self.config.provider}")
             await asyncio.sleep(0.01)
