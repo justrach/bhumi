@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "bhumi"
-version = "0.4.1"
+version = "0.4.2"
 description = "High performance LLM client"
 authors = [
     {name = "Rach Pradhan", email = "rach@rachpradhan.com"},

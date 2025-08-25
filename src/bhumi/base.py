@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, AsyncIterator, Any, Union
 from dataclasses import dataclass
 from .utils import async_retry
+import os
+import bhumi.bhumi as _rust
 
 @dataclass
 class LLMConfig:
@@ -156,14 +158,19 @@ class BaseLLM(ABC):
         self,
         config: LLMConfig,
         max_concurrent: int = 10,
-        debug: bool = False
+        debug: bool = False,
+        debug_debug: bool = False,
     ):
         self.config = config
+        # Resolve flags with env overrides
+        debug = debug
+        debug_debug = debug_debug or (os.environ.get("BHUMI_DEBUG_DEBUG", "0") == "1")
         self.core = _rust.BhumiCore(
             max_concurrent=max_concurrent,
             provider=config.provider or "generic",
             model=config.model,
             debug=debug,
+            debug_debug=debug_debug,
             base_url=config.base_url,
             buffer_size=config.buffer_size,  # Pass buffer_size to Rust
         )

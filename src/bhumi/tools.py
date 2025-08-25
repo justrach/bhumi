@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, List, Callable, Union, Tuple
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class Tool:
     function: Dict[str, Any]
     # Internal metadata not exposed to the model
     _aliases: Optional[Dict[str, str]] = None
+    _on_unknown: Optional[str] = None  # 'drop' | 'error' | 'allow'
 
     @classmethod
     def create_function(
@@ -25,6 +27,7 @@ class Tool:
         parameters: Dict[str, Any],
         strict: bool = True,
         aliases: Optional[Dict[str, str]] = None,
+        on_unknown: str = "drop",
     ) -> "Tool":
         """
         Create a function tool definition compatible with OpenAI/JSON-schema style.
@@ -62,6 +65,7 @@ class Tool:
                 "strict": strict,
             },
             _aliases=aliases or None,
+            _on_unknown=on_unknown or "drop",
         )
 
 
@@ -95,6 +99,7 @@ class ToolRegistry:
         *,
         strict: bool = True,
         aliases: Optional[Dict[str, str]] = None,
+        on_unknown: str = "drop",
     ) -> None:
         """Register a new tool with optional alias normalization."""
         self._tools[name] = func
@@ -104,6 +109,7 @@ class ToolRegistry:
             parameters=parameters,
             strict=strict,
             aliases=aliases,
+            on_unknown=on_unknown,
         )
 
     def get_tool(self, name: str) -> Optional[Callable[..., Any]]:
@@ -123,14 +129,14 @@ class ToolRegistry:
         """
         out: List[Dict[str, Any]] = []
         for t in self._definitions.values():
+            params = self._relax_schema(t.function["parameters"])  # Relax to avoid provider-side rejections
             out.append(
                 {
                     "type": t.type,
                     "function": {
                         "name": t.function["name"],
                         "description": t.function["description"],
-                        "parameters": t.function["parameters"],
-                        "strict": t.function.get("strict", True),
+                        "parameters": params,
                     },
                 }
             )
@@ -150,16 +156,34 @@ class ToolRegistry:
         """
         out: List[Dict[str, Any]] = []
         for t in self._definitions.values():
+            params = self._relax_schema(t.function["parameters"])  # Relax to avoid provider-side rejections
             out.append(
                 {
                     "type": "custom",
                     "name": t.function["name"],
                     "description": t.function["description"],
                     # Anthropic expects input_schema JSON Schema object
-                    "input_schema": t.function["parameters"],
+                    "input_schema": params,
                 }
             )
         return out
+
+    def _relax_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a shallow-cloned schema relaxed for public export.
+        - For object schemas, force additionalProperties=True to prevent provider validation failures
+        - Do not mutate the internal stored schema
+        """
+        try:
+            if not isinstance(schema, dict):
+                return copy.deepcopy(schema)
+            clone = copy.deepcopy(schema)
+            if clone.get("type") == "object":
+                # Allow unknown keys in public schema; internal validator will drop/handle them
+                clone["additionalProperties"] = True
+            return clone
+        except Exception:
+            # Fallback to original if deepcopy fails
+            return schema
 
     async def execute_tool(self, tool_call: ToolCall, debug: bool = False) -> Any:
         """
@@ -195,8 +219,14 @@ class ToolRegistry:
                 if src in args and dst not in args:
                     args[dst] = args.pop(src)
 
-        # Minimal validation
-        self._validate_args(schema, args, tool_name=name)
+        # Sanitize + minimal validation (drop/allow/error for unknowns, shallow type coercion)
+        args = self._validate_args(
+            schema,
+            args,
+            tool_name=name,
+            on_unknown=(definition._on_unknown or "drop"),
+            debug=debug,
+        )
 
         if debug:
             logger.debug("Executing tool=%s args=%s", name, json.dumps(args, indent=2))
@@ -242,33 +272,73 @@ class ToolRegistry:
         )
         return await self.execute_tool(tool_call, debug=debug)
 
-    def _validate_args(self, schema: Dict[str, Any], args: Dict[str, Any], tool_name: str) -> None:
+    def _validate_args(
+        self,
+        schema: Dict[str, Any],
+        args: Dict[str, Any],
+        tool_name: str,
+        *,
+        on_unknown: str = "drop",
+        debug: bool = False,
+    ) -> Dict[str, Any]:
         """
-        Minimal JSON-object validation:
+        Minimal JSON-object validation + sanitization:
         - Enforce required presence
-        - Enforce additionalProperties=False (unless schema says True)
+        - Unknown keys behavior per-tool: 'drop' (default), 'error', or 'allow'
+        - Shallow type coercion for basic types (int/float/bool) from strings
+        Returns sanitized args
         """
         if not isinstance(schema, dict) or schema.get("type") != "object":
             # Only validate object schemas
-            return
+            return args
 
         props: Dict[str, Any] = schema.get("properties", {}) or {}
         required: List[str] = schema.get("required", []) or []
         additional: bool = schema.get("additionalProperties", False)
 
-        # Required presence
-        missing = [k for k in required if k not in args]
-        if missing:
-            raise ValueError(f"Tool '{tool_name}' missing required parameter(s): {', '.join(missing)}")
+        allowed = set(props.keys())
+        sanitized = dict(args)
 
-        # Additional properties
-        if additional is False:
-            allowed = set(props.keys())
-            unknown = [k for k in args.keys() if k not in allowed]
-            if unknown:
+        # Handle unknowns first
+        unknown = [k for k in sanitized.keys() if k not in allowed]
+        if unknown:
+            if on_unknown == "error" and additional is False:
                 raise ValueError(
                     f"Tool '{tool_name}' received unknown parameter(s): {', '.join(unknown)}; allowed: {', '.join(sorted(allowed))}"
                 )
+            if on_unknown == "drop":
+                for k in unknown:
+                    sanitized.pop(k, None)
+                if debug and unknown:
+                    logger.debug("Tool %s dropped unknown args: %s", tool_name, ", ".join(unknown))
+            # if 'allow', keep as-is
 
-        # NOTE: We intentionally skip deep type checks/coercion to keep this lightweight.
-        # Satya or the downstream validator should handle detailed constraints.
+        # Required presence after unknown handling
+        missing = [k for k in required if k not in sanitized]
+        if missing:
+            raise ValueError(f"Tool '{tool_name}' missing required parameter(s): {', '.join(missing)}")
+
+        # Shallow type coercion based on schema where possible
+        for key, spec in props.items():
+            if key not in sanitized:
+                continue
+            val = sanitized[key]
+            t = (spec or {}).get("type")
+            try:
+                if t == "integer" and isinstance(val, str) and val.strip().isdigit():
+                    sanitized[key] = int(val)
+                elif t == "number" and isinstance(val, str):
+                    sanitized[key] = float(val)
+                elif t == "boolean" and isinstance(val, str):
+                    low = val.lower().strip()
+                    if low in {"true", "1", "yes", "y"}:
+                        sanitized[key] = True
+                    elif low in {"false", "0", "no", "n"}:
+                        sanitized[key] = False
+                elif t == "array" and isinstance(val, str) and val.strip().startswith("["):
+                    sanitized[key] = json.loads(val)
+            except Exception:
+                # Keep original if coercion fails
+                pass
+
+        return sanitized
