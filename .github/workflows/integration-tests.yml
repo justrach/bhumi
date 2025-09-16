@@ -68,22 +68,25 @@ jobs:
           # API Keys from GitHub Secrets
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          SAMBANOVA_API_KEY: ${{ secrets.SAMBANOVA_API_KEY }}
-          
-          # Test Configuration
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TEST_TIMEOUT: 60
           TEST_MAX_TOKENS: 100
           TEST_DEBUG: false
-          
           # Filter providers if specified
           TEST_PROVIDERS: ${{ github.event.inputs.providers || 'all' }}
           
         run: |
           cd tests/integration
-          python test_all_providers.py
+          # Run tests only if API keys are available
+          if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$GROQ_API_KEY" ] && [ -z "$GEMINI_API_KEY" ]; then
+            echo "⚠️ No API keys configured - skipping integration tests"
+            echo "To run integration tests, add API keys to GitHub Secrets"
+            exit 0
+          else
+            echo "✅ API keys found - running integration tests"
+            python test_all_providers.py
+          fi
           
       - name: 📊 Upload Test Results
         if: always()
