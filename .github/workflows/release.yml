@@ -87,7 +87,10 @@ jobs:
           pip install maturin build
 
       - name: 📦 Build source distribution
-        run: maturin sdist --out dist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
 
       - name: 📤 Upload sdist as artifact
         uses: actions/upload-artifact@v4

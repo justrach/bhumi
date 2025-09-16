@@ -32,13 +32,16 @@ jobs:
           pip install maturin
 
       - name: 🏗️ Test Build
-        run: |
-          maturin build --release
-          echo "✅ Build successful on ${{ matrix.os }} with Python ${{ matrix.python-version }}"
+        uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist
+          
+      - name: ✅ Build Success
+        run: echo "✅ Build successful on ${{ matrix.os }} with Python ${{ matrix.python-version }}"
 
       - name: 🧪 Test Installation
         run: |
-          pip install target/wheels/*.whl
+          pip install dist/*.whl
           python -c "import bhumi; print('✅ Import successful')"
 
   check-version:
