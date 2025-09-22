@@ -228,34 +228,70 @@ Notes:
 - OpenAI-compatible providers use `tools` with `tool_calls` in responses; Gemini uses `function_declarations` and `tool_config` under the hood.
 - Bhumi parses tool calls, executes your Python function, appends a `tool` message, and continues the conversation automatically.
 
-## Structured Output via Pydantic
+## 🚀 **Structured Outputs with High-Performance Validation**
 
-Generate schema-conformant JSON using a Pydantic model. Bhumi registers a hidden tool `generate_structured_output` for the model; the LLM will call it to return strictly-typed data.
+Bhumi now supports structured outputs with both Pydantic and Satya validation, featuring the latest Satya v0.3.6 integration for **2-7x faster** validation:
 
+### Satya v0.3.6 Integration (Recommended)
 ```python
-from pydantic import BaseModel
+import asyncio
 from bhumi.base_client import BaseLLMClient, LLMConfig
+from satya import Model, Field
 
-class UserInfo(BaseModel):
-    """Return the user's full_name and age"""
-    full_name: str
-    age: int
+class UserProfile(Model):
+    """High-performance user profile with Satya validation"""
+    name: str = Field(description="User's full name")
+    age: int = Field(description="User's age", ge=13, le=120)
+    email: str = Field(description="Email address", email=True)  # RFC 5322 validation
 
 async def main():
-    client = BaseLLMClient(LLMConfig(api_key=os.getenv("OPENAI_API_KEY"), model="openai/gpt-4o", debug=True))
-    client.set_structured_output(UserInfo)
+    client = BaseLLMClient(LLMConfig(api_key=os.getenv("OPENAI_API_KEY"), model="openai/gpt-4o"))
 
-    resp = await client.completion([
-        {"role": "user", "content": "Extract name and age from: Alice Johnson, age 29"}
-    ])
+    # Use parse() method similar to OpenAI's client.chat.completions.parse()
+    completion = await client.parse(
+        messages=[{"role": "user", "content": "Create user Alice, age 25"}],
+        response_format=UserProfile,  # Satya model for high performance
+        timeout=15.0  # Built-in timeout protection
+    )
 
-    # The model uses the registered tool so the final message contains strict JSON
-    print(resp["text"])  # e.g., {"full_name": "Alice Johnson", "age": 29}
+    user = completion.parsed  # Already validated with 2-7x performance boost!
+    print(f"User: {user.name}, Age: {user.age}, Email: {user.email}")
 
 asyncio.run(main())
 ```
 
-Dependencies: structured output uses Pydantic v2. Ensure `pydantic>=2` is installed (bundled as a dependency).
+### Key Features
+- **Satya v0.3.6**: Built-in OpenAI-compatible schema generation
+- **2-7x Performance**: Faster than Pydantic validation
+- **RFC 5322 Email Validation**: Proper email format checking
+- **Decimal Precision**: Financial-grade number handling
+- **Timeout Protection**: Built-in timeout with helpful error messages
+- **Batch Processing**: `validator.set_batch_size(1000)` for high throughput
+
+### Pydantic Support (Standard)
+```python
+from pydantic import BaseModel
+from bhumi.base_client import BaseLLMClient, LLMConfig
+
+class UserProfile(BaseModel):
+    name: str
+    age: int
+    email: str
+
+# Same API works with Pydantic models too
+completion = await client.parse(
+    messages=[{"role": "user", "content": "Create user Bob, age 30"}],
+    response_format=UserProfile
+)
+```
+
+### Performance Comparison
+- **Satya v0.3.6**: 2-7x faster validation, RFC 5322 email validation, Decimal support
+- **Pydantic**: Rich ecosystem, comprehensive type coercion, excellent documentation
+- **Use Satya** for production workloads requiring maximum performance
+- **Use Pydantic** for development and complex validation scenarios
+
+Learn more in our [Structured Outputs Documentation](STRUCTURED_OUTPUTS.md).
 
 ## Streaming Support
 All providers support streaming responses:
