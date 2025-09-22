@@ -7,17 +7,17 @@ from satya import Model, Field
 class SystemConfig(Model):
     """System configuration with Satya validation for fast parsing and validation"""
     buffer_size: int = Field(
-        min_value=1024, 
+        min_value=256, 
         max_value=1000000,
         description="Buffer size in bytes"
     )
     min_buffer: int = Field(
-        min_value=512,
+        min_value=64,  # More lenient minimum
         max_value=100000,
         description="Minimum buffer size"
     )
     max_buffer: int = Field(
-        min_value=1024,
+        min_value=256,  # More lenient minimum
         max_value=2000000,
         description="Maximum buffer size"
     )
