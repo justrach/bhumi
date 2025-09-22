@@ -13,6 +13,16 @@ import uuid
 import re
 from pydantic import BaseModel, create_model
 import inspect
+from .structured_outputs import (
+    StructuredOutputParser, 
+    ResponseFormat, 
+    ParsedChatCompletion,
+    pydantic_function_tool,
+    pydantic_tool_schema,
+    StructuredOutputError,
+    LengthFinishReasonError,
+    ContentFilterFinishReasonError
+)
 
 @dataclass
 class LLMConfig:
@@ -145,43 +155,8 @@ class ReasoningResponse:
         """Default to showing just the output"""
         return self._output
 
-class StructuredOutput:
-    """Handler for structured output from LLM responses"""
-    
-    def __init__(self, output_type: Type[BaseModel]):
-        self.output_type = output_type
-        self._schema = output_type.model_json_schema()
-    
-    def to_tool_schema(self) -> dict:
-        """Convert Pydantic model to function parameters schema"""
-        return {
-            "type": "object",
-            "properties": self._schema.get("properties", {}),
-            "required": self._schema.get("required", []),
-            "additionalProperties": False
-        }
-    
-    def parse_response(self, response: str) -> BaseModel:
-        """Parse LLM response into structured output"""
-        # Strict JSON first
-        try:
-            data = json_loads(response)
-            return self.output_type.model_validate(data)
-        except JSONDecodeError:
-            pass
-
-        # Loose extraction from text
-        data = parse_json_loosely(response)
-        if data is not None:
-            return self.output_type.model_validate(data)
-
-        raise ValueError("Response is not in structured format")
-    
-    def _extract_structured_data(self, text: str) -> BaseModel:
-        """Extract structured data from text response"""
-        # Add extraction logic here
-        # For now, just raise an error
-        raise ValueError("Response is not in structured format")
+# Backward compatibility alias - use new structured_outputs module instead
+StructuredOutput = StructuredOutputParser
 
 class BaseLLMClient:
     """Generic client for OpenAI-compatible APIs"""
@@ -261,23 +236,128 @@ class BaseLLMClient:
         )
 
     def set_structured_output(self, model: Type[BaseModel]) -> None:
-        """Set up structured output handling with a Pydantic model"""
-        self.structured_output = StructuredOutput(model)
+        """
+        Set up structured output handling with a Pydantic model.
         
-        # Register a tool for structured output
+        Note: This method is deprecated. Use the parse() method instead for better
+        OpenAI/Anthropic compatibility.
+        """
+        self.structured_output = StructuredOutputParser(model)
+        
+        # Register a tool for structured output  
         self.register_tool(
             name="generate_structured_output",
             func=self._structured_output_handler,
             description=f"Generate structured output according to the schema: {model.__doc__}",
-            parameters=self.structured_output.to_tool_schema()
+            parameters={"type": "object", "properties": model.model_json_schema().get("properties", {}), "required": model.model_json_schema().get("required", []), "additionalProperties": False}
         )
     
     async def _structured_output_handler(self, **kwargs) -> dict:
         """Handle structured output generation"""
         try:
-            return self.structured_output.output_type(**kwargs).model_dump()
+            return self.structured_output.response_format(**kwargs).model_dump()
         except Exception as e:
             raise ValueError(f"Failed to create structured output: {e}")
+
+    async def parse(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        response_format: Type[Union[BaseModel, Any]],  # Support both Pydantic and Satya models
+        stream: bool = False,
+        debug: bool = False,
+        timeout: Optional[float] = 30.0,  # Add timeout parameter
+        **kwargs
+    ) -> Union[ParsedChatCompletion, AsyncIterator[str]]:
+        """
+        Create a completion with automatic parsing of structured outputs.
+        
+        Similar to OpenAI's client.chat.completions.parse() method.
+        Automatically converts Pydantic or Satya models to JSON schema and parses
+        the response back into the specified model with high-performance validation.
+        
+        Args:
+            messages: List of messages for the conversation
+            response_format: Pydantic BaseModel or Satya Model class to parse response into
+            stream: Whether to stream the response (not supported for parsing)
+            debug: Enable debug logging
+            **kwargs: Additional arguments passed to completion()
+            
+        Returns:
+            ParsedChatCompletion with validated structured content
+            
+        Raises:
+            ValueError: If streaming is requested (not supported)
+            LengthFinishReasonError: If completion finished due to length limits
+            ContentFilterFinishReasonError: If completion finished due to content filtering
+            StructuredOutputError: If parsing fails
+            
+        Note:
+            Satya models provide high-performance Rust-powered validation and are
+            recommended for production workloads requiring fast structured outputs.
+        """
+        if stream:
+            raise ValueError("Streaming is not supported with parse() method. Use completion() with stream=True instead.")
+        
+        # Create response format for the model
+        response_format_dict = ResponseFormat.from_model(response_format)
+        
+        # Add response_format to kwargs
+        kwargs["response_format"] = response_format_dict
+        
+        # Get completion response with timeout
+        import asyncio
+        try:
+            response = await asyncio.wait_for(
+                self.completion(messages, stream=False, debug=debug, **kwargs),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            raise ValueError(f"API call timed out after {timeout} seconds. Try increasing timeout for complex schemas or large models.")
+        except Exception as e:
+            raise ValueError(f"API call failed: {e}")
+        
+        # Parse using structured output parser
+        parser = StructuredOutputParser(response_format)
+        
+        # Handle different response types
+        if isinstance(response, ReasoningResponse):
+            # For reasoning responses, create a mock API response format
+            mock_response = {
+                "id": "reasoning-" + str(uuid.uuid4()),
+                "object": "chat.completion",
+                "created": int(asyncio.get_event_loop().time()),
+                "model": self.config.model,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": response._output
+                    },
+                    "finish_reason": "stop"
+                }]
+            }
+        elif isinstance(response, dict) and "raw_response" in response:
+            mock_response = response["raw_response"]
+        else:
+            # Create mock response from simple dict response
+            content = response.get("text", str(response)) if isinstance(response, dict) else str(response)
+            mock_response = {
+                "id": "completion-" + str(uuid.uuid4()),
+                "object": "chat.completion", 
+                "created": int(asyncio.get_event_loop().time()),
+                "model": self.config.model,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": content
+                    },
+                    "finish_reason": "stop"
+                }]
+            }
+        
+        return parser.parse_response(mock_response)
 
     async def _handle_tool_calls(
         self,
