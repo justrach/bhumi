@@ -4,14 +4,14 @@ build-backend = "maturin"
 
 [project]
 name = "bhumi"
-version = "0.4.3"
+version = "0.4.4"
 description = "High performance LLM client"
 authors = [
     {name = "Rach Pradhan", email = "rach@rachpradhan.com"},
 ]
 readme = "README.md"
 dependencies = [
-    "satya>=0.2.1",
+    "satya>=0.3.6",
     "orjson>=3.8.0",
     "pydantic>=2.0"
 ]
