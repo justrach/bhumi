@@ -41,7 +41,8 @@ jobs:
 
       - name: 🧪 Test Installation
         run: |
-          pip install --find-links dist --no-index bhumi
+          # Install only from wheels, not source distributions
+          pip install --find-links dist --no-index --only-binary=all bhumi
           python -c "import bhumi; print('✅ Import successful')"
 
   check-version:

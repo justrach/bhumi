@@ -267,8 +267,8 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          # Let pip automatically select the compatible wheel
-          pip install --find-links wheelhouse --no-index bhumi
+          # Install only from wheels, not source distributions
+          pip install --find-links wheelhouse --no-index --only-binary=all bhumi
           
           # Test the installation
           python -c "
