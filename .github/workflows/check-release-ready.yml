@@ -87,7 +87,7 @@ jobs:
                       elif 'cp38' in part and 'abi3' in wheel_name:
                           # cp38-abi3 is compatible with Python 3.8+
                           target_major_minor = int(target_version[2:])  # cp311 -> 11
-                          if target_major_minor >= 38:
+                          if target_major_minor >= 8:  # Python 3.8+ (cp38 = 8, cp311 = 11)
                               return True
               return False
           
