@@ -96,6 +96,8 @@ jobs:
           PKG_CONFIG_SYSROOT_DIR_aarch64_unknown_linux_gnu: /
           OPENSSL_DIR: /usr/local
           OPENSSL_ROOT_DIR: /usr/local
+          # Use vendored OpenSSL for cross-compilation to avoid system dependency issues
+          OPENSSL_NO_VENDOR: 1
       
       - name: Upload wheels
         uses: actions/upload-artifact@v4
