@@ -7,7 +7,7 @@ for maximum performance. Based on the deepwiki research, Satya v0.3 provides:
 ✅ SUPPORTED TYPES:
 - Primitive types: str, int, float, bool
 - Collections: List, Dict, Tuple
-- Special types: UUID, Decimal, datetime
+- Special types: UUID, datetime
 - Complex types: nested Model instances, Optional fields
 
 ✅ SUPPORTED CONSTRAINTS:
@@ -19,6 +19,7 @@ for maximum performance. Based on the deepwiki research, Satya v0.3 provides:
 - Use batch processing with batch_size=1000 for optimal performance
 - Use stream processing for large datasets
 - Leverage JSON bytes validators for raw JSON input
+- Use float instead of Decimal for constraints (Satya v0.3.7 limitation)
 
 This example shows production-ready usage with performance optimizations.
 """
@@ -27,7 +28,7 @@ import asyncio
 import os
 from typing import List, Optional
 from datetime import datetime
-from decimal import Decimal
+# Removed: from decimal import Decimal (no longer needed)
 from dotenv import load_dotenv
 
 # Import Bhumi components
@@ -52,12 +53,12 @@ class Address(Model):
 
 
 class Subscription(Model):
-    """User subscription with financial precision"""
+    """User subscription information"""
     plan: str = Field(description="Subscription plan type", pattern="^(free|basic|premium)$")
     status: str = Field(description="Current subscription status", pattern="^(active|expired|cancelled)$")
     start_date: datetime = Field(description="When the subscription started")
     end_date: Optional[datetime] = Field(description="When the subscription ends/ended", default=None)
-    monthly_fee: Decimal = Field(description="Monthly fee", ge=0, le=Decimal('10000.00'))
+    monthly_fee: float = Field(description="Monthly fee", ge=0.0, le=10000.0)
 
 
 class UserProfile(Model):
@@ -69,7 +70,7 @@ class UserProfile(Model):
     age: int = Field(description="User age", ge=13, le=120)
     address: Address = Field(description="User's address")
     subscription: Subscription = Field(description="Subscription information")
-    balance: Decimal = Field(description="Account balance", ge=Decimal('-10000.00'), le=Decimal('1000000.00'))
+    balance: float = Field(description="Account balance", ge=-10000.0, le=1000000.0)
     is_active: bool = Field(description="Account status", default=True)
     tags: List[str] = Field(description="User tags", max_items=10, default=[])
     created_at: datetime = Field(description="Account creation timestamp")
@@ -222,14 +223,14 @@ def demo_satya_supported_constraints():
         "String": ["min_length", "max_length", "pattern", "email", "url"],
         "Numeric": ["ge", "le", "gt", "lt", "min_value", "max_value"],
         "Collections": ["min_items", "max_items", "unique_items"],
-        "Types": ["str", "int", "float", "bool", "Decimal", "datetime", "UUID", "List", "Dict", "Optional"]
+        "Types": ["str", "int", "float", "bool", "datetime", "UUID", "List", "Dict", "Optional"]
     }
 
     for category, items in constraints.items():
         print(f"🔹 {category}: {', '.join(items)}")
 
     print("\n✅ RFC 5322 compliant email validation")
-    print("✅ Financial-grade Decimal precision")
+    print("✅ High-precision numeric validation")
     print("✅ Nested model validation")
     print("✅ Enum/Literal type support")
 
