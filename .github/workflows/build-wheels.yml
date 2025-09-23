@@ -64,7 +64,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
-      
+      # Set up Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
@@ -80,6 +80,22 @@ jobs:
           manylinux: ${{ matrix.manylinux }}
           container: quay.io/pypa/manylinux_${{ matrix.manylinux }}_aarch64
           docker-options: "--platform linux/arm64"
+          before-script: |
+            # Install OpenSSL development libraries
+            if command -v yum >/dev/null 2>&1; then
+              yum install -y openssl-devel pkg-config
+            elif command -v apk >/dev/null 2>&1; then
+              apk add openssl-dev pkgconfig
+            elif command -v apt-get >/dev/null 2>&1; then
+              apt-get update && apt-get install -y libssl-dev pkg-config
+            fi
+        env:
+          # Cross-compilation environment variables for OpenSSL/pkg-config
+          PKG_CONFIG_PATH_aarch64_unknown_linux_gnu: /usr/local/lib/pkgconfig
+          PKG_CONFIG_LIBDIR_aarch64_unknown_linux_gnu: /usr/local/lib
+          PKG_CONFIG_SYSROOT_DIR_aarch64_unknown_linux_gnu: /
+          OPENSSL_DIR: /usr/local
+          OPENSSL_ROOT_DIR: /usr/local
       
       - name: Upload wheels
         uses: actions/upload-artifact@v4
