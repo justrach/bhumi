@@ -58,19 +58,19 @@ class SystemConfig(Model):
     )
 
 class ArchiveEntry(Model):
-    """MAP-Elites archive entry with optimized Satya validation"""
+    """MAP-Elites archive entry with Satya v0.3.7 validation"""
     config: SystemConfig = Field(description="System configuration")
     performance: float = Field(
-        min_value=-1000.0,
-        max_value=100000.0,
+        ge=-1000.0,
+        le=100000.0,
         description="Performance metric"
     )
 
 class MapElitesArchive(Model):
-    """Complete MAP-Elites archive structure with Satya validation"""
+    """Complete MAP-Elites archive structure with Satya v0.3.7 validation"""
     resolution: int = Field(
-        min_value=1,
-        max_value=20,
+        ge=1,
+        le=20,
         description="Archive grid resolution"
     )
     archive: Dict[str, ArchiveEntry] = Field(
@@ -78,49 +78,49 @@ class MapElitesArchive(Model):
     )
 
 class MapElitesBuffer:
-    """Optimized buffer strategy using trained MAP-Elites archive with Satya + orjson"""
+    """Optimized buffer strategy using trained MAP-Elites archive with orjson + Satya v0.3.7 nested model validation"""
     
     def __init__(self, archive_path: str = "src/archive_latest.json"):
         self.current_size = 8192  # Default starting size
         self.chunk_history = []
         self.response_length = 0
         
-        # Fast loading with orjson + Satya validation
+        # Fast loading with orjson + Satya v0.3.7 nested model validation
         self._load_archive_fast(archive_path)
         
         # Get best overall config as fallback
         self.best_config = max(self.archive.values(), key=lambda x: x[1])[0]
         
     def _load_archive_fast(self, archive_path: str):
-        """Fast archive loading with orjson and Satya validation"""
+        """Fast archive loading with orjson and Satya v0.3.7 nested model validation"""
         try:
             # Use orjson for ultra-fast JSON parsing (2-3x faster than json)
             with open(archive_path, 'rb') as f:
                 raw_data = orjson.loads(f.read())
-            
-            # Use Satya for fast validation and parsing
-            validator = MapElitesArchive.validator()
-            validation_result = validator.validate(raw_data)
-            
-            if not validation_result.is_valid:
-                raise ValueError(f"Invalid archive format: {validation_result}")
-            
-            archive_data = validation_result.value
-            
-            # Convert to our internal format with parsed tuples
-            # Avoid eval() by parsing tuple strings safely
-            self.archive = {}
-            
-            for coord_str, entry_data in archive_data["archive"].items():
-                # Parse coordinate tuple safely (e.g., "(1, 3, 0)" -> (1, 3, 0))
-                coord_tuple = self._parse_coordinate_tuple(coord_str)
-                
-                # Create SystemConfig instance with Satya
-                config = SystemConfig(**entry_data["config"])
-                
-                # Store as tuple key with SystemConfig and performance
-                self.archive[coord_tuple] = (config, entry_data["performance"])
-                
+
+            # Use Satya v0.3.7's enhanced nested model validation
+            # This now supports Dict[str, ArchiveEntry] structures!
+            try:
+                archive_model = MapElitesArchive(**raw_data)
+
+                # Convert to our internal format with parsed tuples
+                self.archive = {}
+
+                for coord_str, entry in archive_model.archive.items():
+                    # Parse coordinate tuple safely (e.g., "(1, 3, 0)" -> (1, 3, 0))
+                    coord_tuple = self._parse_coordinate_tuple(coord_str)
+
+                    # Store as tuple key with SystemConfig and performance
+                    # entry.config is already a validated SystemConfig instance
+                    # entry.performance is already validated as float
+                    self.archive[coord_tuple] = (entry.config, entry.performance)
+
+                print(f"✅ Successfully loaded {len(self.archive)} archive entries using Satya v0.3.7 nested model validation")
+
+            except Exception as validation_error:
+                print(f"Satya validation failed ({validation_error}), falling back to manual validation...")
+                self._load_archive_manual(raw_data)
+
         except Exception as e:
             # Fallback to slower method if fast loading fails
             print(f"Fast loading failed ({e}), falling back to standard JSON...")
