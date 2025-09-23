@@ -203,8 +203,8 @@ def demo_satya_features():
     print("Demo: Satya-Specific Features")
     print("=" * 60)
     
-    # Enable pretty printing for Satya models
-    Model.PRETTY_REPR = True
+    # Enable pretty printing for Satya models (removed in v0.3.7)
+    # Model.PRETTY_REPR = True
     
     print("🔧 Creating Satya validator with batch processing...")
     validator = SatyaUserProfile.validator()
@@ -216,34 +216,32 @@ def demo_satya_features():
         'username': 'tokyo_user',
         'email': 'user@tokyo.jp',
         'full_name': 'Tokyo User',
-        'age': '25',  # String that will be coerced to int
-        'address': {
-            'street': '1-1-1 Shibuya',
-            'city': 'Tokyo',
-            'state': 'Tokyo',
-            'country': 'Japan',
-            'postal_code': '150-0042'
-        },
-        'balance': '2500.75',  # String that will be coerced to Decimal
-        'created_at': '2024-01-01T00:00:00Z'
+        'age': 25,  # Keep as int for Satya v0.3.7
+        'active': True
     }
     
     try:
         print("⚡ Validating with Satya (high-performance)...")
-        result = validator.validate(test_data)
-        user = SatyaUserProfile(**result.value)
-        
-        print("✅ Satya validation successful:")
-        print(f"   Type coercion: age='{test_data['age']}' → {user.age} (int)")
-        print(f"   Decimal precision: balance='{test_data['balance']}' → {user.balance}")
-        print(f"   Email validation: {user.email} ✓")
-        print(f"   Pattern validation: {user.user_id} ✓")
-        
-        print(f"\n📊 Pretty representation:")
-        print(user)
-        
+        # Updated API for Satya v0.3.7 - use validate_stream for batch processing
+        for validated in validator.validate_stream([test_data]):
+            # ValidationResult has a 'value' attribute with the validated data
+            user_data = validated.value
+            user = SatyaUserProfile(**user_data)
+            
+            print("✅ Satya validation successful:")
+            print(f"   Type validation: age={user.age} (int)")
+            print(f"   Email validation: {user.email} ✓")
+            print(f"   String validation: {user.user_id} ✓")
+            
+            print(f"\n📊 User profile:")
+            print(f"   User: {user.username} ({user.full_name})")
+            print(f"   Email: {user.email}")
+            print(f"   Status: {'Active' if user.active else 'Inactive'}")
+            
     except Exception as e:
         print(f"❌ Satya features demo failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def demo_tool_creation():

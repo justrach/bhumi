@@ -5,7 +5,7 @@ from typing import List, Optional, Literal
 import os
 import json
 from datetime import datetime
-from satya.openai import OpenAISchema
+# Removed: from satya.openai import OpenAISchema (deprecated in v0.3.7)
 
 class Address(Model):
     """User address information"""
@@ -34,13 +34,11 @@ class UserProfile(Model):
     created_at: datetime = Field(description="Account creation timestamp")
 
 async def main():
+    # Updated for Satya v0.3.7 - use client.parse() instead of manual schema setup
     config = LLMConfig(
         api_key=os.getenv("OPENAI_API_KEY"),
         model="openai/gpt-4o-mini",
-        debug=True,
-        extra_config={
-            "response_format": OpenAISchema.response_format(UserProfile, "user_profile")
-        }
+        debug=True
     )
     
     client = BaseLLMClient(config)
@@ -67,42 +65,37 @@ async def main():
     for query in test_queries:
         print(f"\n\nQuery: {query}")
         try:
-            response = await client.completion([
-                {"role": "system", "content": """You are a user database assistant.
-                    When asked about users, generate a realistic user profile.
-                    Return a single JSON object matching the schema.
-                    Make sure all dates are in ISO format (YYYY-MM-DDTHH:MM:SS).
-                    Do not wrap the response in markdown code blocks."""},
-                {"role": "user", "content": query}
-            ])
+            # Updated for Satya v0.3.7 - use client.parse() with response_format
+            completion = await client.parse(
+                messages=[
+                    {"role": "system", "content": """You are a user database assistant.
+                        When asked about users, generate a realistic user profile.
+                        Return a single JSON object matching the schema.
+                        Make sure all dates are in ISO format (YYYY-MM-DDTHH:MM:SS).
+                        Do not wrap the response in markdown code blocks."""},
+                    {"role": "user", "content": query}
+                ],
+                response_format=UserProfile  # Pass Satya model directly
+            )
             
-            try:
-                # Parse and validate the response using Satya
-                print("\nRaw Response:")
-                print(response["text"])
+            if completion.parsed:
+                user_data = completion.parsed.model_dump()  # Convert Satya model to dict
+                print("\nValidated User Profile:")
+                print(json.dumps(user_data, indent=2, default=str))
                 
-                # Clean and parse the response
-                cleaned_response = clean_json_response(response["text"])
-                
-                # Validate using Satya's streaming validator
-                for validated in validator.validate_stream([json.loads(cleaned_response)]):
-                    user_data = validated
-                    print("\nValidated User Profile:")
-                    print(json.dumps(user_data, indent=2, default=str))
-                    
-                    # Save profile to file
-                    filename = f"user_profile_{user_data['user_id']}.json"
-                    with open(filename, "w") as f:
-                        json.dump(user_data, f, indent=2, default=str)
-                    print(f"\nProfile saved to {filename}")
-                
-            except Exception as e:
-                print(f"\nFailed to validate response: {e}")
-                print("Cleaned response:")
-                print(cleaned_response)
+                # Save profile to file
+                filename = f"user_profile_{user_data['user_id']}.json"
+                with open(filename, "w") as f:
+                    json.dump(user_data, f, indent=2, default=str)
+                print(f"\nProfile saved to {filename}")
+            else:
+                print("❌ No parsed data available")
+                print("Raw response:", completion.choices[0].message.content if completion.choices else "No content")
             
         except Exception as e:
             print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
     try:
