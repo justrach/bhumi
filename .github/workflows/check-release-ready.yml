@@ -71,9 +71,29 @@ jobs:
           wheels = [f for f in os.listdir('dist') if f.endswith('.whl')]
           compatible_wheel = None
           
+          def is_python_compatible(wheel_name, target_version):
+              '''Check if wheel is compatible with target Python version'''
+              if target_version in wheel_name:
+                  return True
+              # Check for abi3 wheels (stable ABI, compatible with Python 3.8+)
+              if 'abi3' in wheel_name:
+                  # Extract the minimum Python version from abi3 wheel
+                  parts = wheel_name.split('-')
+                  for part in parts:
+                      if part.startswith('cp') and part.endswith('abi3'):
+                          min_version = part.replace('abi3', '')
+                          if min_version <= target_version:
+                              return True
+                      elif 'cp38' in part and 'abi3' in wheel_name:
+                          # cp38-abi3 is compatible with Python 3.8+
+                          target_major_minor = int(target_version[2:])  # cp311 -> 11
+                          if target_major_minor >= 38:
+                              return True
+              return False
+          
           for wheel in wheels:
               print(f'Checking wheel: {wheel}')
-              if python_version in wheel:
+              if is_python_compatible(wheel, python_version):
                   for tag in platform_tags:
                       if tag in wheel:
                           compatible_wheel = wheel
@@ -83,10 +103,10 @@ jobs:
                       break
           
           if not compatible_wheel:
-              print('No platform-specific wheel found, trying any available wheel...')
-              # Fallback: try any wheel with matching Python version
+              print('No platform-specific wheel found, trying any Python-compatible wheel...')
+              # Fallback: try any wheel with compatible Python version
               for wheel in wheels:
-                  if python_version in wheel:
+                  if is_python_compatible(wheel, python_version):
                       compatible_wheel = wheel
                       print(f'Using fallback wheel: {wheel}')
                       break
