@@ -40,6 +40,7 @@ jobs:
         run: echo "✅ Build successful on ${{ matrix.os }} with Python ${{ matrix.python-version }}"
 
       - name: 🧪 Test Installation
+        shell: bash
         run: |
           # List what's in dist folder for debugging
           echo "Contents of dist folder:"
