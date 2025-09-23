@@ -309,13 +309,13 @@ jobs:
           python -c "
           try:
               import bhumi
-              print('✅ Bhumi imported successfully')
+              print('Bhumi imported successfully')
               # Test basic functionality
               from bhumi.utils import print_performance_status
               print_performance_status()
-              print('✅ All tests passed!')
+              print('All tests passed!')
           except Exception as e:
-              print(f'❌ Test failed: {e}')
+              print(f'Test failed: {e}')
               exit(1)
           "
 

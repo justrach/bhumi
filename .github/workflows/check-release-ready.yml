@@ -125,7 +125,7 @@ jobs:
               exit(1)
           "
           
-          python -c "import bhumi; print('✅ Import successful')"
+          python -c "import bhumi; print('Import successful')"
 
   check-version:
     name: 🏷️ Check Version Consistency
