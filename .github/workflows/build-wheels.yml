@@ -267,32 +267,8 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          # Find and install the appropriate wheel for this Python version and OS
-          python -c "
-          import os, sys, platform
-          version = f'{sys.version_info.major}{sys.version_info.minor}'
-          
-          # Determine platform suffix
-          if sys.platform.startswith('win'):
-              platform_tag = 'win_amd64' if platform.machine().endswith('64') else 'win32'
-          elif sys.platform.startswith('darwin'):
-              platform_tag = 'macosx'
-          else:
-              platform_tag = 'linux_x86_64'
-          
-          wheels = [f for f in os.listdir('wheelhouse') if f.endswith('.whl') and f'cp{version}' in f and (platform_tag in f or 'any' in f)]
-          if wheels:
-              wheel = wheels[0]
-              os.system(f'pip install wheelhouse/{wheel}')
-              print(f'Installed wheel: {wheel}')
-          else:
-              print(f'No wheel found for Python {sys.version_info.major}.{sys.version_info.minor} on {sys.platform}')
-              print('Available wheels:')
-              for f in os.listdir('wheelhouse'):
-                  if f.endswith('.whl'):
-                      print(f'  {f}')
-              exit(1)
-          "
+          # Let pip automatically select the compatible wheel
+          pip install --find-links wheelhouse --no-index bhumi
           
           # Test the installation
           python -c "
