@@ -41,7 +41,7 @@ jobs:
 
       - name: 🧪 Test Installation
         run: |
-          pip install dist/*.whl
+          pip install --find-links dist --no-index bhumi
           python -c "import bhumi; print('✅ Import successful')"
 
   check-version:
