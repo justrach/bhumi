@@ -74,10 +74,9 @@ jobs:
         with:
           target: aarch64
           args: >-
-            --release 
-            --out dist 
+            --release
+            --out dist
             --strip
-            --interpreter /opt/python/cp${{ matrix.python-version == '3.10' && '310' || matrix.python-version == '3.11' && '311' || matrix.python-version == '3.12' && '312' || matrix.python-version == '3.13' && '313' || matrix.python-version == '3.8' && '38' || '39' }}-cp${{ matrix.python-version == '3.10' && '310' || matrix.python-version == '3.11' && '311' || matrix.python-version == '3.12' && '312' || matrix.python-version == '3.13' && '313' || matrix.python-version == '3.8' && '38' || '39' }}/bin/python
           manylinux: ${{ matrix.manylinux }}
           container: quay.io/pypa/manylinux_${{ matrix.manylinux }}_aarch64
           docker-options: "--platform linux/arm64"

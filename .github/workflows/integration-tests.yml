@@ -3,6 +3,8 @@ name: 🚀 Bhumi Integration Tests
 on:
   push:
     branches: [main, develop]
+    tags:
+      - 'v*'
   pull_request:
     branches: [main, develop]
   schedule:
