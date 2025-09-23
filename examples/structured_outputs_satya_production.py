@@ -20,8 +20,13 @@ for maximum performance. Based on the deepwiki research, Satya v0.3 provides:
 - Use stream processing for large datasets
 - Leverage JSON bytes validators for raw JSON input
 - Use float instead of Decimal for constraints (Satya v0.3.7 limitation)
+- Keep schemas simple for OpenAI structured output compatibility
 
 This example shows production-ready usage with performance optimizations.
+
+NOTE: OpenAI's structured output API has limitations on schema complexity:
+- Very complex nested schemas may not work reliably
+- Use SimpleUserProfile for testing, full UserProfile for production validation
 """
 
 import asyncio
@@ -76,6 +81,16 @@ class UserProfile(Model):
     created_at: datetime = Field(description="Account creation timestamp")
 
 
+# Create a simpler UserProfile for testing (OpenAI API has limits on schema complexity)
+class SimpleUserProfile(Model):
+    """Simplified user profile for reliable structured output generation"""
+    user_id: str = Field(description="Unique user ID", min_length=3, max_length=20)
+    username: str = Field(description="Username", min_length=3, max_length=50)
+    email: str = Field(description="Email address", email=True)
+    full_name: str = Field(description="Full name", min_length=1, max_length=200)
+    age: int = Field(description="User age", ge=13, le=120)
+
+
 class WeatherQuery(Model):
     """Weather query with optimized validation"""
     location: str = Field(description="Location to get weather for", min_length=1, max_length=100)
@@ -112,7 +127,7 @@ async def demo_satya_structured_outputs():
     test_cases = [
         {
             "name": "Simple Profile",
-            "model": UserProfile,
+            "model": SimpleUserProfile,
             "prompt": "Create a simple user profile for John Smith, 30 years old, from New York"
         },
         {
@@ -197,7 +212,7 @@ def demo_satya_performance_features():
     print("-" * 40)
 
     # Create validator with batch processing (recommended for production)
-    validator = UserProfile.validator()
+    validator = SimpleUserProfile.validator()
     validator.set_batch_size(1000)  # Optimal batch size
 
     print("✅ Configured validator with batch_size=1000")
