@@ -41,8 +41,14 @@ jobs:
 
       - name: 🧪 Test Installation
         run: |
-          # Install only from wheels, not source distributions
-          pip install --find-links dist --no-index --only-binary=all bhumi
+          # List what's in dist folder for debugging
+          echo "Contents of dist folder:"
+          ls -la dist/
+          
+          # Install directly from the wheel file, not by package name
+          WHEEL_FILE=$(ls dist/*.whl | head -1)
+          echo "Installing wheel: $WHEEL_FILE"
+          pip install "$WHEEL_FILE"
           python -c "import bhumi; print('✅ Import successful')"
 
   check-version:
