@@ -43,6 +43,12 @@ jobs:
       - name: 🦀 Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: 📦 Install system dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
       - name: 🏗️ Build wheels
         uses: PyO3/maturin-action@v1
         with:
