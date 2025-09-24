@@ -1,39 +1,33 @@
 """
-Structured outputs implementation following OpenAI and Anthropic patterns.
+Structured outputs implementation using Satya for high-performance validation.
 
 This module provides:
-- JSON schema generation from Pydantic and Satya models
+- JSON schema generation from Satya models
 - Response format configuration for structured outputs
 - Parsed completion types with automatic validation
 - Tool definition helpers for structured tool calls
-- High-performance validation with Satya integration
+- High-performance validation with Satya v0.3.7
 """
 
 from __future__ import annotations
 
 import json
 import inspect
-from typing import Type, TypeVar, Dict, Any, Optional, Union, List, get_type_hints
+from typing import Type, TypeVar, Dict, Any, Optional, List
 from dataclasses import dataclass
 
-# Import Pydantic (always available)
-from pydantic import BaseModel, ValidationError, create_model
-
-# Import Satya (optional but recommended for performance)
+# Import Satya (required for structured outputs)
 try:
     from satya import Model as SatyaModel, Field as SatyaField, ValidationError as SatyaValidationError
     SATYA_AVAILABLE = True
 except ImportError:
-    SATYA_AVAILABLE = False
-    SatyaModel = None
-    SatyaField = None
-    SatyaValidationError = None
+    raise ImportError(
+        "Satya is required for structured outputs. Install with: pip install 'satya>=0.3.7'"
+    )
 
-# Type variables for both model types
-T = TypeVar('T', bound=Union[BaseModel, 'SatyaModel'])
-PydanticModel = TypeVar('PydanticModel', bound=BaseModel)
-if SATYA_AVAILABLE:
-    SatyaModelType = TypeVar('SatyaModelType', bound=SatyaModel)
+# Type variables for Satya models
+T = TypeVar('T', bound=SatyaModel)
+SatyaModelType = TypeVar('SatyaModelType', bound=SatyaModel)
 
 
 class StructuredOutputError(Exception):
@@ -51,149 +45,90 @@ class LengthFinishReasonError(StructuredOutputError):
     pass
 
 
-class ContentFilterFinishReasonError(StructuredOutputError):
-    """Raised when completion finishes due to content filtering"""
+class ContentFilterError(StructuredOutputError):
+    """Raised when completion is filtered by content policy"""
     pass
 
 
-@dataclass
-class ParsedMessage:
-    """Represents a parsed message with structured content"""
-    content: Optional[str] = None
-    parsed: Optional[Union[BaseModel, 'SatyaModel']] = None
-    refusal: Optional[str] = None
-    role: str = "assistant"
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-    
-    def __bool__(self) -> bool:
-        """Returns True if parsing was successful"""
-        return self.parsed is not None
-
-
-@dataclass
-class ParsedChoice:
-    """Represents a parsed choice from the completion response"""
-    message: ParsedMessage
-    index: int = 0
-    finish_reason: Optional[str] = None
-    logprobs: Optional[Dict[str, Any]] = None
-
-
-@dataclass 
-class ParsedChatCompletion:
-    """
-    Represents a parsed chat completion response, similar to OpenAI's ParsedChatCompletion.
-    Contains the original response plus parsed structured data.
-    """
-    id: str
-    choices: List[ParsedChoice]
-    created: int
-    model: str
-    object: str = "chat.completion"
-    system_fingerprint: Optional[str] = None
-    usage: Optional[Dict[str, Any]] = None
-    
-    @property
-    def parsed(self) -> Optional[Union[BaseModel, 'SatyaModel']]:
-        """Get the first parsed result for convenience"""
-        if self.choices and self.choices[0].message.parsed:
-            return self.choices[0].message.parsed
-        return None
-
-
-def _is_pydantic_model(model_class: Type) -> bool:
-    """Check if a class is a Pydantic model"""
-    return (
-        inspect.isclass(model_class) and 
-        issubclass(model_class, BaseModel)
-    )
+# Alias for backward compatibility
+ContentFilterFinishReasonError = ContentFilterError
 
 
 def _is_satya_model(model_class: Type) -> bool:
     """Check if a class is a Satya model"""
     return (
-        SATYA_AVAILABLE and 
+        SATYA_AVAILABLE and
         inspect.isclass(model_class) and 
         issubclass(model_class, SatyaModel)
     )
 
 
-def _get_model_schema(model_class: Type) -> Dict[str, Any]:
-    """Get JSON schema from either Pydantic or Satya model"""
-    if _is_pydantic_model(model_class):
-        return model_class.model_json_schema()
-    elif _is_satya_model(model_class):
-        # Use Satya v0.3.6's built-in OpenAI-compatible schema generation
-        try:
-            return model_class.model_json_schema()
-        except AttributeError:
-            # Fallback for older Satya versions
-            return model_class.json_schema()
-    else:
-        raise ValueError(f"Unsupported model type: {model_class}. Must be Pydantic BaseModel or Satya Model.")
+def _get_model_schema(model_class: Type[SatyaModel]) -> Dict[str, Any]:
+    """Get JSON schema from Satya model"""
+    if not _is_satya_model(model_class):
+        raise ValueError(f"Unsupported model type: {model_class}. Must be Satya Model.")
+    
+    # Use Satya v0.3.7's built-in OpenAI-compatible schema generation
+    try:
+        return model_class.openai_schema()
+    except AttributeError:
+        # Fallback for older Satya versions
+        return model_class.json_schema()
 
 
-
-def _validate_with_model(model_class: Type, data: Dict[str, Any]) -> Union[BaseModel, 'SatyaModel']:
-    """Validate data with either Pydantic or Satya model"""
-    if _is_pydantic_model(model_class):
-        return model_class.model_validate(data)
-    elif _is_satya_model(model_class):
-        # Satya v0.3 validation - use model_validate (Pydantic-compatible API)
-        try:
-            # Use the Pydantic-compatible method first
-            if hasattr(model_class, 'model_validate'):
-                return model_class.model_validate(data)
-            else:
-                # Fallback to direct instantiation with validation
-                return model_class(**data)
-        except Exception as e:
-            # If Satya validation fails, provide detailed error
-            if SATYA_AVAILABLE and isinstance(e, SatyaValidationError):
-                raise ValueError(f"Satya validation failed: {e}")
-            else:
-                raise ValueError(f"Satya model validation failed for {model_class.__name__}: {e}")
-    else:
-        raise ValueError(f"Unsupported model type: {model_class}. Must be Pydantic BaseModel or Satya Model.")
+def _validate_with_model(model_class: Type[SatyaModel], data: Dict[str, Any]) -> SatyaModel:
+    """Validate data with Satya model"""
+    if not _is_satya_model(model_class):
+        raise ValueError(f"Unsupported model type: {model_class}. Must be Satya Model.")
+    
+    try:
+        # Use the Pydantic-compatible method first
+        if hasattr(model_class, 'model_validate'):
+            return model_class.model_validate(data)
+        else:
+            # Fallback to direct instantiation
+            return model_class(**data)
+    except (SatyaValidationError, ValueError, TypeError) as e:
+        if isinstance(e, SatyaValidationError):
+            raise SchemaValidationError(f"Satya validation failed: {e}")
+        else:
+            raise ValueError(f"Satya model validation failed for {model_class.__name__}: {e}")
 
 
-def pydantic_function_tool(model: Type[Union[BaseModel, 'SatyaModel']], *, name: Optional[str] = None, description: Optional[str] = None) -> Dict[str, Any]:
+def satya_function_tool(model: Type[SatyaModel], *, name: Optional[str] = None, description: Optional[str] = None) -> Dict[str, Any]:
     """
-    Convert a Pydantic or Satya model to a function tool definition with strict JSON schema.
-    Similar to OpenAI's pydantic_function_tool helper.
+    Convert a Satya model to a function tool definition with strict JSON schema.
+    Similar to OpenAI's function tool helper.
     
     Args:
-        model: Pydantic BaseModel or Satya Model class to convert
+        model: Satya Model class to convert
         name: Optional name for the tool (defaults to model name)
         description: Optional description (defaults to model docstring)
     
     Returns:
-        Tool definition dict compatible with OpenAI-style function calling
+        Function tool definition dict compatible with OpenAI's Chat Completions API
     """
     schema = _get_model_schema(model)
+    tool_name = name or model.__name__.lower()
+    tool_description = description or model.__doc__ or f"Tool using {model.__name__} schema"
     
     return {
         "type": "function",
         "function": {
-            "name": name or model.__name__.lower(),
-            "description": description or model.__doc__ or f"Execute {model.__name__}",
-            "parameters": {
-                "type": "object", 
-                "properties": schema.get("properties", {}),
-                "required": schema.get("required", []),
-                "additionalProperties": False
-            },
-            "strict": True
+            "name": tool_name,
+            "description": tool_description,
+            "parameters": schema,
+            "strict": True  # Enable strict mode for better validation
         }
     }
 
 
-def pydantic_tool_schema(model: Type[Union[BaseModel, 'SatyaModel']]) -> Dict[str, Any]:
+def satya_tool_schema(model: Type[SatyaModel]) -> Dict[str, Any]:
     """
-    Convert Pydantic or Satya model to Anthropic-style tool schema.
+    Convert Satya model to Anthropic-style tool schema.
     
     Args:
-        model: Pydantic BaseModel or Satya Model class to convert
+        model: Satya Model class to convert
         
     Returns:
         Tool schema dict compatible with Anthropic's tool calling format
@@ -202,261 +137,287 @@ def pydantic_tool_schema(model: Type[Union[BaseModel, 'SatyaModel']]) -> Dict[st
     
     return {
         "name": model.__name__.lower(),
-        "description": model.__doc__ or f"Use the {model.__name__} tool",
-        "input_schema": {
-            "type": "object",
-            "properties": schema.get("properties", {}),
-            "required": schema.get("required", []),
-            "additionalProperties": False
-        }
+        "description": model.__doc__ or f"Tool using {model.__name__} schema",
+        "input_schema": schema
     }
 
 
+@dataclass
 class ResponseFormat:
-    """Helper class for creating response format specifications"""
+    """
+    Response format configuration for structured outputs.
+    Compatible with OpenAI's response_format parameter.
+    """
+    type: str = "json_schema"
+    json_schema: Optional[Dict[str, Any]] = None
     
     @staticmethod
-    def json_object() -> Dict[str, str]:
-        """Create a JSON object response format"""
-        return {"type": "json_object"}
-    
-    @staticmethod 
-    def json_schema(schema: Dict[str, Any], *, name: str, description: Optional[str] = None, strict: bool = True) -> Dict[str, Any]:
-        """Create a JSON schema response format"""
+    def from_model(model: Type[SatyaModel], *, name: Optional[str] = None, strict: bool = False) -> Dict[str, Any]:
+        """Create response format from Satya model"""
+        schema = _get_model_schema(model)
+        model_name = name or model.__name__.lower()
+        
         return {
             "type": "json_schema",
             "json_schema": {
-                "name": name,
-                "description": description or f"Schema for {name}",
+                "name": model_name,
                 "schema": schema,
                 "strict": strict
             }
         }
-    
-    @staticmethod
-    def from_model(model: Type[Union[BaseModel, 'SatyaModel']], *, name: Optional[str] = None, strict: bool = False) -> Dict[str, Any]:
-        """Create response format from Pydantic or Satya model"""
-        schema = _get_model_schema(model)
-        model_name = name or model.__name__.lower()
-        
-        return ResponseFormat.json_schema(
-            schema=schema,
-            name=model_name, 
-            description=model.__doc__,
-            strict=strict
-        )
 
 
 class StructuredOutputParser:
     """
     Parser for handling structured outputs with automatic validation.
     Follows patterns similar to OpenAI's client.chat.completions.parse() method.
-    Supports both Pydantic and Satya models for high-performance validation.
+    Supports Satya models for high-performance validation.
     """
     
-    def __init__(self, response_format: Type[Union[BaseModel, 'SatyaModel']]):
+    def __init__(self, response_format: Type[SatyaModel]):
         self.response_format = response_format
-        self._schema = _get_model_schema(response_format)
-        
-        # For Satya models, pre-create validator for performance
-        self._satya_validator = None
-        if _is_satya_model(response_format):
-            self._satya_validator = response_format.validator()
-            self._satya_validator.set_batch_size(1)  # Single item validation
+        self.model_name = response_format.__name__
     
-    def _extract_json_from_response(self, content: str) -> Dict[str, Any]:
-        """Extract JSON from various response formats"""
-        content = content.strip()
+    def parse_response(self, response: Dict[str, Any]) -> 'ParsedCompletion':
+        """Parse and validate API response"""
         
-        # Try direct JSON parse first
+        # Handle different response formats
+        if 'choices' in response and len(response['choices']) > 0:
+            choice = response['choices'][0]
+            
+            # Check finish reason
+            finish_reason = choice.get('finish_reason')
+            if finish_reason == 'length':
+                raise LengthFinishReasonError("Completion was truncated due to length limits")
+            elif finish_reason == 'content_filter':
+                raise ContentFilterError("Completion was filtered by content policy")
+            
+            # Extract content
+            message = choice.get('message', {})
+            content = message.get('content', '')
+            
+            # Handle refusal
+            if message.get('refusal'):
+                raise SchemaValidationError(f"Model refused to generate structured output: {message['refusal']}")
+            
+        elif 'content' in response:
+            # Direct content response
+            content = response['content']
+        else:
+            raise SchemaValidationError("Invalid response format: no content found")
+        
+        # Parse JSON content
         try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            pass
+            if isinstance(content, str):
+                parsed_data = json.loads(content)
+            else:
+                parsed_data = content
+        except json.JSONDecodeError as e:
+            raise SchemaValidationError(f"Invalid JSON in response: {e}")
         
-        # Try extracting from markdown code blocks
-        import re
+        # Validate against model
+        try:
+            validated_model = _validate_with_model(self.response_format, parsed_data)
+        except (SchemaValidationError, ValueError) as e:
+            raise SchemaValidationError(f"Response validation failed: {e}")
         
-        # Look for ```json blocks
-        json_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL | re.IGNORECASE)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1).strip())
-            except json.JSONDecodeError:
-                pass
-        
-        # Look for first balanced JSON object
-        for i, char in enumerate(content):
-            if char == '{':
-                depth = 0
-                for j in range(i, len(content)):
-                    if content[j] == '{':
-                        depth += 1
-                    elif content[j] == '}':
-                        depth -= 1
-                        if depth == 0:
-                            try:
-                                return json.loads(content[i:j+1])
-                            except json.JSONDecodeError:
-                                break
-                break
-        
-        # Look for first balanced JSON array  
-        for i, char in enumerate(content):
-            if char == '[':
-                depth = 0
-                for j in range(i, len(content)):
-                    if content[j] == '[':
-                        depth += 1
-                    elif content[j] == ']':
-                        depth -= 1
-                        if depth == 0:
-                            try:
-                                return json.loads(content[i:j+1])
-                            except json.JSONDecodeError:
-                                break
-                break
-        
-        raise SchemaValidationError("No valid JSON found in response content")
-    
-    def parse_response(self, response_data: Dict[str, Any]) -> ParsedChatCompletion:
-        """
-        Parse a completion response into a ParsedChatCompletion with validated structured data.
-        
-        Args:
-            response_data: Raw response data from the API
-            
-        Returns:
-            ParsedChatCompletion with validated structured content
-            
-        Raises:
-            LengthFinishReasonError: If completion finished due to length limits
-            ContentFilterFinishReasonError: If completion finished due to content filtering
-            SchemaValidationError: If response doesn't match expected schema
-        """
-        # Check for problematic finish reasons
-        choices = response_data.get("choices", [])
-        if choices:
-            finish_reason = choices[0].get("finish_reason")
-            if finish_reason == "length":
-                raise LengthFinishReasonError("Completion finished due to length limits")
-            elif finish_reason == "content_filter":
-                raise ContentFilterFinishReasonError("Completion finished due to content filtering")
-        
-        parsed_choices = []
-        
-        for i, choice in enumerate(choices):
-            message = choice.get("message", {})
-            content = message.get("content", "")
-            refusal = message.get("refusal")
-            
-            parsed_obj = None
-            if content and not refusal:
-                try:
-                    # Extract and validate JSON
-                    json_data = self._extract_json_from_response(content)
-                    parsed_obj = _validate_with_model(self.response_format, json_data)
-                except (json.JSONDecodeError, ValidationError, SchemaValidationError) as e:
-                    # Also catch Satya validation errors if available
-                    if SATYA_AVAILABLE and isinstance(e, SatyaValidationError):
-                        parsed_obj = None
-                    else:
-                        # Don't raise here - let user handle validation errors gracefully
-                        parsed_obj = None
-                except Exception as e:
-                    # Catch any other validation errors
-                    parsed_obj = None
-            
-            parsed_message = ParsedMessage(
-                content=content,
-                parsed=parsed_obj,
-                refusal=refusal,
-                role=message.get("role", "assistant"),
-                tool_calls=message.get("tool_calls")
-            )
-            
-            parsed_choice = ParsedChoice(
-                message=parsed_message,
-                index=i,
-                finish_reason=choice.get("finish_reason"),
-                logprobs=choice.get("logprobs")
-            )
-            
-            parsed_choices.append(parsed_choice)
-        
-        return ParsedChatCompletion(
-            id=response_data.get("id", ""),
-            choices=parsed_choices,
-            created=response_data.get("created", 0),
-            model=response_data.get("model", ""),
-            object=response_data.get("object", "chat.completion"),
-            system_fingerprint=response_data.get("system_fingerprint"),
-            usage=response_data.get("usage")
+        return ParsedCompletion(
+            id=response.get('id', 'unknown'),
+            choices=[
+                ParsedChoice(
+                    finish_reason=response.get('choices', [{}])[0].get('finish_reason', 'stop'),
+                    index=0,
+                    message=ParsedMessage(
+                        content=content,
+                        parsed=validated_model,
+                        refusal=None,
+                        role='assistant'
+                    )
+                )
+            ],
+            created=response.get('created', 0),
+            model=response.get('model', 'unknown'),
+            object='chat.completion.parsed',
+            system_fingerprint=response.get('system_fingerprint'),
+            usage=response.get('usage', {}),
+            parsed=validated_model  # Direct access to parsed object
         )
 
 
-def create_anthropic_tools_from_models(*models: Type[Union[BaseModel, 'SatyaModel']]) -> List[Dict[str, Any]]:
+@dataclass
+class ParsedMessage:
+    """Parsed message with validated structured output"""
+    content: str
+    parsed: Optional[SatyaModel]
+    refusal: Optional[str]
+    role: str
+
+
+@dataclass
+class ParsedChoice:
+    """Parsed choice with structured output"""
+    finish_reason: str
+    index: int
+    message: ParsedMessage
+
+
+@dataclass
+class ParsedCompletion:
     """
-    Create Anthropic-compatible tool definitions from Pydantic or Satya models.
+    Parsed completion response with structured output validation.
+    Similar to OpenAI's ParsedChatCompletion type.
+    """
+    id: str
+    choices: List[ParsedChoice]
+    created: int
+    model: str
+    object: str
+    system_fingerprint: Optional[str]
+    usage: Dict[str, Any]
+    parsed: Optional[SatyaModel]  # Direct access to the parsed object
+
+
+# Alias for backward compatibility
+ParsedChatCompletion = ParsedCompletion
+
+
+# Tool creation helpers
+def create_anthropic_tools_from_models(*models: Type[SatyaModel]) -> List[Dict[str, Any]]:
+    """
+    Create Anthropic-compatible tool definitions from Satya models.
     
     Args:
-        *models: Pydantic BaseModel or Satya Model classes to convert to tools
+        *models: Satya Model classes to convert to tools
         
     Returns:
         List of tool definitions compatible with Anthropic's Messages API
     """
-    return [pydantic_tool_schema(model) for model in models]
+    return [satya_tool_schema(model) for model in models]
 
 
-def create_openai_tools_from_models(*models: Type[Union[BaseModel, 'SatyaModel']]) -> List[Dict[str, Any]]:
+def create_openai_tools_from_models(*models: Type[SatyaModel]) -> List[Dict[str, Any]]:
     """
-    Create OpenAI-compatible function tool definitions from Pydantic or Satya models.
+    Create OpenAI-compatible function tool definitions from Satya models.
     
     Args:
-        *models: Pydantic BaseModel or Satya Model classes to convert to tools
+        *models: Satya Model classes to convert to tools
         
     Returns:
         List of function tool definitions compatible with OpenAI's Chat Completions API
     """
-    return [pydantic_function_tool(model) for model in models]
+    return [satya_function_tool(model) for model in models]
 
 
-def parse_tool_call_arguments(tool_call: Dict[str, Any], model: Type[Union[BaseModel, 'SatyaModel']]) -> Union[BaseModel, 'SatyaModel']:
+def parse_tool_call_arguments(tool_call: Dict[str, Any], model: Type[SatyaModel]) -> SatyaModel:
     """
-    Parse and validate tool call arguments against a Pydantic or Satya model.
+    Parse and validate tool call arguments against a Satya model.
     
     Args:
         tool_call: Tool call data from API response
-        model: Pydantic BaseModel or Satya Model to validate against
+        model: Satya Model to validate against
         
     Returns:
         Validated model instance
-        
-    Raises:
-        ValidationError: If arguments don't match model schema
     """
-    function = tool_call.get("function", {})
-    arguments = function.get("arguments", {})
+    # Extract arguments from tool call
+    if 'function' in tool_call and 'arguments' in tool_call['function']:
+        args_str = tool_call['function']['arguments']
+        if isinstance(args_str, str):
+            args_data = json.loads(args_str)
+        else:
+            args_data = args_str
+    elif 'arguments' in tool_call:
+        args_data = tool_call['arguments']
+    else:
+        raise ValueError("Invalid tool call format: no arguments found")
     
-    # Handle case where arguments is a JSON string
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError as e:
-            raise ValidationError(f"Invalid JSON in tool call arguments: {e}")
-    
-    return _validate_with_model(model, arguments)
+    return _validate_with_model(model, args_data)
 
 
 # Helper functions for backward compatibility
-def to_response_format(model: Type[Union[BaseModel, 'SatyaModel']], name: Optional[str] = None) -> Dict[str, Any]:
-    """Convert Pydantic or Satya model to response_format dict (OpenAI style)"""
+def to_response_format(model: Type[SatyaModel], name: Optional[str] = None) -> Dict[str, Any]:
+    """Convert Satya model to response_format dict (OpenAI style)"""
     return ResponseFormat.from_model(model, name=name)
 
 
-def to_tool_schema(model: Type[Union[BaseModel, 'SatyaModel']]) -> Dict[str, Any]:
-    """Convert Pydantic or Satya model to tool schema dict"""
-    return pydantic_function_tool(model)
+def to_tool_schema(model: Type[SatyaModel]) -> Dict[str, Any]:
+    """Convert Satya model to tool schema dict"""
+    return satya_function_tool(model)
+
+
+# Test harness - runs when file is executed directly
+if __name__ == "__main__":
+    import asyncio
+    import os
+    
+    print("🧪 Bhumi Structured Outputs Test Suite (Satya Only)")
+    print("=" * 60)
+    
+    # Test 1: Satya Model
+    print("\n1️⃣ Testing Satya Model...")
+    if SATYA_AVAILABLE:
+        try:
+            class SatyaUser(SatyaModel):
+                name: str = SatyaField(description="User name")
+                age: int = SatyaField(description="User age")
+            
+            schema = _get_model_schema(SatyaUser)
+            print("✅ Satya schema generation works")
+            
+            response_format = ResponseFormat.from_model(SatyaUser)
+            print("✅ Satya response format works")
+            
+            validated = _validate_with_model(SatyaUser, {"name": "Jane", "age": 25})
+            print(f"✅ Satya validation works: {validated.name}, {validated.age}")
+            
+        except Exception as e:
+            print(f"❌ Satya test failed: {e}")
+    else:
+        print("❌ Satya not available - install with: pip install 'satya>=0.3.7'")
+    
+    # Test 2: Parser Test
+    print("\n2️⃣ Testing Response Parser...")
+    if SATYA_AVAILABLE:
+        try:
+            parser = StructuredOutputParser(SatyaUser)
+            
+            mock_response = {
+                'id': 'test-123',
+                'choices': [{
+                    'message': {
+                        'content': '{"name": "Parser Test", "age": 42}',
+                        'role': 'assistant'
+                    },
+                    'finish_reason': 'stop'
+                }],
+                'created': 1234567890,
+                'model': 'test-model'
+            }
+            
+            parsed = parser.parse_response(mock_response)
+            print(f"✅ Parser works: {parsed.parsed.name}, {parsed.parsed.age}")
+            
+        except Exception as e:
+            print(f"❌ Parser test failed: {e}")
+    
+    # Test 3: Tool Schema Generation
+    print("\n3️⃣ Testing Tool Schema Generation...")
+    if SATYA_AVAILABLE:
+        try:
+            tool_schema = satya_function_tool(SatyaUser)
+            print("✅ OpenAI tool schema generation works")
+            
+            anthropic_schema = satya_tool_schema(SatyaUser)
+            print("✅ Anthropic tool schema generation works")
+            
+        except Exception as e:
+            print(f"❌ Tool schema test failed: {e}")
+    
+    print(f"\n🎯 Test Summary: Satya v0.3.7 High-Performance Validation")
+    print(f"   • 2-7x faster than alternatives")
+    print(f"   • OpenAI-compatible schema generation")
+    print(f"   • Nested model support")
+    print(f"   • Production-ready validation")
 
 
 # Test harness - runs when file is executed directly

@@ -11,14 +11,13 @@ import statistics
 from .tools import ToolRegistry, Tool, ToolCall
 import uuid
 import re
-from pydantic import BaseModel, create_model
 import inspect
 from .structured_outputs import (
     StructuredOutputParser, 
     ResponseFormat, 
     ParsedChatCompletion,
-    pydantic_function_tool,
-    pydantic_tool_schema,
+    satya_function_tool,
+    satya_tool_schema,
     StructuredOutputError,
     LengthFinishReasonError,
     ContentFilterFinishReasonError
@@ -237,15 +236,16 @@ class BaseLLMClient:
             on_unknown=on_unknown,
         )
 
-    def set_structured_output(self, model: Type[BaseModel]) -> None:
+    def set_structured_output(self, model: Type[Any]) -> None:
         """
-        Set up structured output handling with a Pydantic model.
+        Set up structured output handling with a Satya model.
         
         Note: This method is deprecated. Use the parse() method instead for better
         OpenAI/Anthropic compatibility.
-        """
-        self.structured_output = StructuredOutputParser(model)
         
+        Args:
+            model: Satya Model class for structured output validation
+        """
         # Register a tool for structured output  
         self.register_tool(
             name="generate_structured_output",
@@ -267,8 +267,8 @@ class BaseLLMClient:
         *,
         input: List[Dict[str, Any]] = None,  # New OpenAI Responses API parameter
         instructions: str = None,  # New OpenAI Responses API parameter
-        response_format: Type[Union[BaseModel, Any]] = None,  # Support both Pydantic and Satya models
-        text_format: Type[Union[BaseModel, Any]] = None,  # Alternative parameter name
+        response_format: Type[Any] = None,  # Support Satya models
+        text_format: Type[Any] = None,  # Alternative parameter name
         stream: bool = False,
         debug: bool = False,
         timeout: Optional[float] = 30.0,  # Add timeout parameter
@@ -302,8 +302,8 @@ class BaseLLMClient:
             messages: List of messages for the conversation (legacy pattern)
             input: List of input messages or string (new Responses API pattern)
             instructions: System instructions (new Responses API pattern)
-            response_format: Pydantic BaseModel or Satya Model class (legacy pattern)
-            text_format: Pydantic BaseModel or Satya Model class (new pattern)
+            response_format: Satya Model class (legacy pattern)
+            text_format: Satya Model class (new pattern)
             stream: Whether to stream the response (not supported for parsing)
             debug: Enable debug logging
             timeout: Request timeout in seconds
@@ -354,7 +354,7 @@ class BaseLLMClient:
         self,
         input: Union[str, List[Dict[str, Any]]] = None,
         instructions: str = None,
-        text_format: Type[Union[BaseModel, Any]] = None,
+        text_format: Type[Any] = None,
         debug: bool = False,
         timeout: Optional[float] = 30.0,
         **kwargs
@@ -417,10 +417,194 @@ class BaseLLMClient:
         
         return parser.parse_response(mock_response)
 
+    async def upload_file(
+        self,
+        file_path: str,
+        purpose: str = "ocr",
+        timeout: Optional[float] = 60.0
+    ) -> Dict[str, Any]:
+        """
+        Upload a file to Mistral API for OCR processing.
+        
+        Args:
+            file_path: Path to the file to upload
+            purpose: Purpose of the file (default: "ocr")
+            timeout: Request timeout in seconds
+            
+        Returns:
+            File upload response with file_id
+            
+        Raises:
+            ValueError: If provider is not Mistral or upload fails
+        """
+        if self.config.provider != "mistral":
+            raise ValueError("File upload is only available for Mistral provider")
+        
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}"
+        }
+        
+        url = f"{self.config.base_url}/files"
+        
+        try:
+            import aiohttp
+            with open(file_path, 'rb') as f:
+                data = aiohttp.FormData()
+                data.add_field('file', f, filename=file_path.split('/')[-1])
+                data.add_field('purpose', purpose)
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, data=data, headers=headers) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise ValueError(f"File upload error {response.status}: {error_text}")
+                        
+                        return await response.json()
+        except ImportError:
+            # Fallback to requests if aiohttp not available
+            import requests
+            with open(file_path, 'rb') as f:
+                files = {'file': f}
+                data = {'purpose': purpose}
+                response = requests.post(url, files=files, data=data, headers=headers)
+                if response.status_code != 200:
+                    raise ValueError(f"File upload error {response.status_code}: {response.text}")
+                return response.json()
+
+    async def ocr(
+        self,
+        document: Dict[str, Any] = None,
+        file_path: str = None,
+        model: str = "mistral-ocr-latest",  # Correct OCR model name
+        pages: List[int] = None,
+        include_image_base64: bool = False,
+        image_limit: int = None,
+        image_min_size: int = None,
+        bbox_annotation_format: Dict[str, Any] = None,
+        document_annotation_format: Dict[str, Any] = None,
+        timeout: Optional[float] = 60.0,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Perform OCR on a document using Mistral's dedicated OCR API.
+        
+        Supports two workflows:
+        1. Direct file upload: Pass file_path, and it will upload + OCR in one call
+        2. Pre-uploaded file: Pass document with file_id from previous upload
+        
+        Args:
+            document: Document to process (FileChunk, DocumentURLChunk, or ImageURLChunk)
+            file_path: Path to file to upload and process (alternative to document)
+            model: Model to use (required, defaults to mistral-ocr-latest)
+            pages: Specific pages to process (starts from 0)
+            include_image_base64: Include image URLs in response
+            image_limit: Max images to extract
+            image_min_size: Minimum height and width of image to extract
+            bbox_annotation_format: Structured output for bounding boxes
+            document_annotation_format: Structured output for entire document
+            timeout: Request timeout in seconds
+            
+        Returns:
+            OCR response with extracted text and metadata
+            
+        Raises:
+            ValueError: If provider is not Mistral or request fails
+            
+        Examples:
+            # Workflow 1: Direct file upload + OCR
+            result = await client.ocr(file_path="/path/to/document.pdf", pages=[0])
+            
+            # Workflow 2: Pre-uploaded file
+            upload_result = await client.upload_file("/path/to/document.pdf")
+            result = await client.ocr(document={"type": "file", "file_id": upload_result["id"]})
+        """
+        if self.config.provider != "mistral":
+            raise ValueError("OCR API is only available for Mistral provider")
+        
+        # Handle both workflows
+        if file_path and document:
+            raise ValueError("Cannot specify both file_path and document. Choose one workflow.")
+        
+        if file_path:
+            # Workflow 1: Upload file first, then OCR
+            print(f"📤 Uploading file: {file_path}")
+            upload_result = await self.upload_file(file_path, purpose="ocr", timeout=timeout)
+            document = {
+                "type": "file",
+                "file_id": upload_result["id"]
+            }
+            print(f"✅ File uploaded with ID: {upload_result['id']}")
+        
+        if not document:
+            raise ValueError("Must specify either file_path or document parameter")
+        
+        # Build OCR request - model is required by API
+        ocr_request = {
+            "model": model,
+            "document": document
+        }
+        
+        # Add optional parameters only if they have values
+        if pages is not None:
+            ocr_request["pages"] = pages
+        if include_image_base64 is not None:
+            ocr_request["include_image_base64"] = include_image_base64
+        if image_limit is not None:
+            ocr_request["image_limit"] = image_limit
+        if image_min_size is not None:
+            ocr_request["image_min_size"] = image_min_size
+        if bbox_annotation_format is not None:
+            ocr_request["bbox_annotation_format"] = bbox_annotation_format
+        if document_annotation_format is not None:
+            ocr_request["document_annotation_format"] = document_annotation_format
+        
+        # Add any additional kwargs
+        ocr_request.update(kwargs)
+        
+        try:
+            print(f"🔍 Running OCR on document...")
+            response = await asyncio.wait_for(
+                self._submit_ocr_request(ocr_request),
+                timeout=timeout
+            )
+            print(f"✅ OCR completed! Pages processed: {response.get('usage_info', {}).get('pages_processed', 'N/A')}")
+            return response
+        except asyncio.TimeoutError:
+            raise ValueError(f"OCR request timed out after {timeout} seconds")
+        except Exception as e:
+            raise ValueError(f"OCR request failed: {e}")
+
+    async def _submit_ocr_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Submit OCR request to Mistral API"""
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Use Mistral OCR endpoint
+        url = f"{self.config.base_url}/ocr"
+        
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=request, headers=headers) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"OCR API error {response.status}: {error_text}")
+                    
+                    return await response.json()
+        except ImportError:
+            # Fallback to requests if aiohttp not available
+            import requests
+            response = requests.post(url, json=request, headers=headers)
+            if response.status_code != 200:
+                raise ValueError(f"OCR API error {response.status_code}: {response.text}")
+            return response.json()
+
     async def _parse_with_chat_completions_api(
         self,
         messages: List[Dict[str, Any]] = None,
-        response_format: Type[Union[BaseModel, Any]] = None,
+        response_format: Type[Any] = None,
         debug: bool = False,
         timeout: Optional[float] = 30.0,
         **kwargs
