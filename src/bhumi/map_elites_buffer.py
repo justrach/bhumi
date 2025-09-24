@@ -119,7 +119,7 @@ class MapElitesBuffer:
 
             except Exception as validation_error:
                 print(f"Satya validation failed ({validation_error}), falling back to manual validation...")
-                self._load_archive_manual(raw_data)
+                self._load_archive_fallback(archive_path)
 
         except Exception as e:
             # Fallback to slower method if fast loading fails

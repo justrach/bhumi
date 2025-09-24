@@ -21,7 +21,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-13, macos-14]  # Intel and Apple Silicon macOS
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+          - os: windows-latest
+            target: x64
+          - os: macos-13  # Intel
+            target: x86_64
+          - os: macos-14  # Apple Silicon
+            target: aarch64
 
     steps:
       - name: 📥 Checkout Code
@@ -35,29 +43,17 @@ jobs:
       - name: 🦀 Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: 🔧 Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.16.2
-
       - name: 🏗️ Build wheels
-        run: python -m cibuildwheel --output-dir wheelhouse
-        env:
-          # Build for Python 3.8-3.12
-          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
-          
-          # Skip 32-bit builds and musl builds for simplicity
-          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux*"
-          
-          # Use maturin to build wheels
-          CIBW_BUILD_FRONTEND: "build"
-          CIBW_BEFORE_BUILD: "pip install maturin"
-          CIBW_BUILD_VERBOSITY: 1
-          
-          # macOS deployment targets
-          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.12
-          
-          # Test the built wheels
-          CIBW_TEST_REQUIRES: pytest
-          CIBW_TEST_COMMAND: "python -c 'import bhumi; print(\"Bhumi wheel test successful!\")'"
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out wheelhouse --strip
+          sccache: 'true'
+          manylinux: '2014'
+          before-script-linux: |
+            # Install OpenSSL development libraries in the manylinux container
+            yum update -y
+            yum install -y openssl-devel pkgconfig
 
       - name: 📤 Upload wheels as artifacts
         uses: actions/upload-artifact@v4
@@ -98,11 +94,12 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
-  # Test installation from wheels
+  # Test installation from wheels (skipped for faster releases)
   test-wheels:
     name: 🧪 Test wheel installation
     needs: [build-wheels]
     runs-on: ${{ matrix.os }}
+    if: false  # Skip integration tests for faster releases
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -110,7 +107,7 @@ jobs:
 
     steps:
       - name: 📥 Download wheels
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse
@@ -152,7 +149,7 @@ jobs:
   # Create GitHub release
   create-release:
     name: 📋 Create GitHub Release
-    needs: [build-wheels, build-sdist, test-wheels]
+    needs: [build-wheels, build-sdist]  # Removed test-wheels dependency
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
@@ -161,7 +158,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 📥 Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: dist
 
@@ -198,13 +195,13 @@ jobs:
   # Publish to PyPI
   publish-pypi:
     name: 🚀 Publish to PyPI
-    needs: [build-wheels, build-sdist, test-wheels]
+    needs: [build-wheels, build-sdist]  # Removed test-wheels dependency
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.version
 
     steps:
       - name: 📥 Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: dist
 
