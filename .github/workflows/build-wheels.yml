@@ -17,8 +17,8 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
-        # Build both manylinux versions for broader compatibility
-        manylinux: ["2_17", "2_28"]
+        # Use stable manylinux 2.17 for broader compatibility
+        manylinux: ["2_17"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,6 @@ jobs:
           args: --release --out dist --strip
           sccache: 'true'
           manylinux: ${{ matrix.manylinux }}
-          container: quay.io/pypa/manylinux_${{ matrix.manylinux }}_x86_64
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -50,8 +49,8 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
-        # Build both manylinux versions for broader ARM compatibility
-        manylinux: ["2_17", "2_28"]
+        # Use stable manylinux 2.17 for broader ARM compatibility
+        manylinux: ["2_17"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -110,8 +109,8 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
-        # Build both manylinux versions for broader i686 compatibility
-        manylinux: ["2_17", "2_28"]
+        # Use stable manylinux 2.17 for broader i686 compatibility
+        manylinux: ["2_17"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
