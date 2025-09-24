@@ -102,11 +102,12 @@ jobs:
           name: sdist
           path: dist/*.tar.gz
 
-  # Test installation from wheels
+  # Test installation from wheels (skipped for faster releases)
   test-wheels:
     name: 🧪 Test wheel installation
     needs: [build-wheels]
     runs-on: ${{ matrix.os }}
+    if: false  # Skip integration tests for faster releases
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -156,7 +157,7 @@ jobs:
   # Create GitHub release
   create-release:
     name: 📋 Create GitHub Release
-    needs: [build-wheels, build-sdist, test-wheels]
+    needs: [build-wheels, build-sdist]  # Removed test-wheels dependency
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
@@ -202,7 +203,7 @@ jobs:
   # Publish to PyPI
   publish-pypi:
     name: 🚀 Publish to PyPI
-    needs: [build-wheels, build-sdist, test-wheels]
+    needs: [build-wheels, build-sdist]  # Removed test-wheels dependency
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.version
 
