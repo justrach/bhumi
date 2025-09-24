@@ -55,6 +55,10 @@ jobs:
           # macOS deployment targets
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.12
           
+          # Use manylinux2014 for better compatibility (avoid auth issues)
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
+          
           # Test the built wheels
           CIBW_TEST_REQUIRES: pytest
           CIBW_TEST_COMMAND: "python -c 'import bhumi; print(\"Bhumi wheel test successful!\")'"

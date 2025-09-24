@@ -1,10 +1,16 @@
-name: Build and publish wheels
+name: Build and publish wheels (DISABLED - using release.yml instead)
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Disabled to avoid conflicts with release.yml
+  # push:
+  #   tags:
+  #     - 'v*'
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build wheels (manual trigger only)'
+        type: boolean
+        default: false
 
 # Add permissions needed for creating releases
 permissions:
