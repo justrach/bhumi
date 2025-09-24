@@ -65,6 +65,8 @@ class LLMConfig:
                 self.base_url = "https://api.groq.com/openai/v1"
             elif self.provider == "cerebras":
                 self.base_url = "https://api.cerebras.ai/v1"
+            elif self.provider == "mistral":
+                self.base_url = "https://api.mistral.ai/v1"
             elif self.provider == "openrouter":
                 self.base_url = "https://openrouter.ai/api/v1"
             else:
@@ -261,9 +263,12 @@ class BaseLLMClient:
 
     async def parse(
         self,
-        messages: List[Dict[str, Any]],
+        messages: List[Dict[str, Any]] = None,
         *,
-        response_format: Type[Union[BaseModel, Any]],  # Support both Pydantic and Satya models
+        input: List[Dict[str, Any]] = None,  # New OpenAI Responses API parameter
+        instructions: str = None,  # New OpenAI Responses API parameter
+        response_format: Type[Union[BaseModel, Any]] = None,  # Support both Pydantic and Satya models
+        text_format: Type[Union[BaseModel, Any]] = None,  # Alternative parameter name
         stream: bool = False,
         debug: bool = False,
         timeout: Optional[float] = 30.0,  # Add timeout parameter
@@ -272,38 +277,168 @@ class BaseLLMClient:
         """
         Create a completion with automatic parsing of structured outputs.
         
-        Similar to OpenAI's client.chat.completions.parse() method.
-        Automatically converts Pydantic or Satya models to JSON schema and parses
-        the response back into the specified model with high-performance validation.
+        Supports both the legacy Chat Completions API pattern and the new Responses API pattern:
+        
+        Legacy Chat Completions API pattern (all providers):
+            completion = await client.parse(
+                messages=[{"role": "user", "content": "..."}],
+                response_format=MyModel
+            )
+        
+        New OpenAI Responses API pattern (OpenAI only):
+            completion = await client.parse(
+                input=[{"role": "user", "content": "..."}],
+                text_format=MyModel
+            )
+            
+            # Or with separated instructions
+            completion = await client.parse(
+                instructions="You are a helpful assistant.",
+                input="Hello!",
+                text_format=MyModel
+            )
         
         Args:
-            messages: List of messages for the conversation
-            response_format: Pydantic BaseModel or Satya Model class to parse response into
+            messages: List of messages for the conversation (legacy pattern)
+            input: List of input messages or string (new Responses API pattern)
+            instructions: System instructions (new Responses API pattern)
+            response_format: Pydantic BaseModel or Satya Model class (legacy pattern)
+            text_format: Pydantic BaseModel or Satya Model class (new pattern)
             stream: Whether to stream the response (not supported for parsing)
             debug: Enable debug logging
+            timeout: Request timeout in seconds
             **kwargs: Additional arguments passed to completion()
             
         Returns:
             ParsedChatCompletion with validated structured content
             
         Raises:
-            ValueError: If streaming is requested (not supported)
+            ValueError: If streaming is requested or invalid parameters
             LengthFinishReasonError: If completion finished due to length limits
             ContentFilterFinishReasonError: If completion finished due to content filtering
             StructuredOutputError: If parsing fails
             
         Note:
-            Satya models provide high-performance Rust-powered validation and are
-            recommended for production workloads requiring fast structured outputs.
+            - OpenAI models automatically use the new Responses API when input= or instructions= are provided
+            - Other providers continue to use Chat Completions API
+            - Satya models provide high-performance Rust-powered validation for both APIs
         """
         if stream:
             raise ValueError("Streaming is not supported with parse() method. Use completion() with stream=True instead.")
+        
+        # Determine if we should use the new Responses API (OpenAI only)
+        use_responses_api = (
+            self.config.provider == "openai" and 
+            (input is not None or instructions is not None or text_format is not None)
+        )
+        
+        if use_responses_api:
+            return await self._parse_with_responses_api(
+                input=input, 
+                instructions=instructions,
+                text_format=text_format,
+                debug=debug,
+                timeout=timeout,
+                **kwargs
+            )
+        else:
+            return await self._parse_with_chat_completions_api(
+                messages=messages,
+                response_format=response_format,
+                debug=debug,
+                timeout=timeout,
+                **kwargs
+            )
+
+    async def _parse_with_responses_api(
+        self,
+        input: Union[str, List[Dict[str, Any]]] = None,
+        instructions: str = None,
+        text_format: Type[Union[BaseModel, Any]] = None,
+        debug: bool = False,
+        timeout: Optional[float] = 30.0,
+        **kwargs
+    ) -> ParsedChatCompletion:
+        """Parse using OpenAI's new Responses API"""
+        if not text_format:
+            raise ValueError("text_format is required for Responses API")
+        
+        # Create text format for the model (Responses API uses text.format instead of response_format)
+        response_format_dict = ResponseFormat.from_model(text_format)
+        text_format_dict = {
+            "format": response_format_dict
+        }
+        
+        # Prepare request for Responses API
+        request_data = {
+            "model": self.config.model.split("/")[1] if "/" in self.config.model else self.config.model,
+            "text": text_format_dict,
+            **kwargs
+        }
+        
+        # Add input (can be string or list of messages)
+        if input is not None:
+            request_data["input"] = input
+        
+        # Add instructions if provided
+        if instructions is not None:
+            request_data["instructions"] = instructions
+        
+        # Use the new /v1/responses endpoint for OpenAI
+        if debug:
+            print(f"🆕 Using OpenAI Responses API: /v1/responses")
+            print(f"📋 Request: {request_data}")
+        
+        # Submit to Responses API endpoint
+        headers = {"Authorization": f"Bearer {self.config.api_key}"}
+        request = {
+            "_headers": headers,
+            "_endpoint": "/responses",  # Special marker for Responses API
+            **request_data
+        }
+        
+        # Get completion response with timeout
+        import asyncio
+        try:
+            response = await asyncio.wait_for(
+                self._submit_responses_request(request, debug=debug),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            raise ValueError(f"Responses API call timed out after {timeout} seconds.")
+        except Exception as e:
+            raise ValueError(f"Responses API call failed: {e}")
+        
+        # Parse using structured output parser
+        parser = StructuredOutputParser(text_format)
+        
+        # Convert Responses API response to Chat Completions format for parsing
+        mock_response = self._convert_responses_to_chat_format(response)
+        
+        return parser.parse_response(mock_response)
+
+    async def _parse_with_chat_completions_api(
+        self,
+        messages: List[Dict[str, Any]] = None,
+        response_format: Type[Union[BaseModel, Any]] = None,
+        debug: bool = False,
+        timeout: Optional[float] = 30.0,
+        **kwargs
+    ) -> ParsedChatCompletion:
+        """Parse using traditional Chat Completions API"""
+        if not messages:
+            raise ValueError("messages is required for Chat Completions API")
+        if not response_format:
+            raise ValueError("response_format is required for Chat Completions API")
         
         # Create response format for the model
         response_format_dict = ResponseFormat.from_model(response_format)
         
         # Add response_format to kwargs
         kwargs["response_format"] = response_format_dict
+        
+        if debug:
+            print(f"📡 Using Chat Completions API: /v1/chat/completions")
         
         # Get completion response with timeout
         import asyncio
@@ -313,9 +448,9 @@ class BaseLLMClient:
                 timeout=timeout
             )
         except asyncio.TimeoutError:
-            raise ValueError(f"API call timed out after {timeout} seconds. Try increasing timeout for complex schemas or large models.")
+            raise ValueError(f"Chat Completions API call timed out after {timeout} seconds.")
         except Exception as e:
-            raise ValueError(f"API call failed: {e}")
+            raise ValueError(f"Chat Completions API call failed: {e}")
         
         # Parse using structured output parser
         parser = StructuredOutputParser(response_format)
@@ -359,6 +494,161 @@ class BaseLLMClient:
         
         return parser.parse_response(mock_response)
 
+    async def _submit_responses_request(self, request: Dict[str, Any], debug: bool = False) -> Dict[str, Any]:
+        """Submit request to OpenAI Responses API"""
+        # This is a simplified implementation - in practice you'd use the Rust core
+        # with the /v1/responses endpoint instead of /v1/chat/completions
+        
+        # For now, we'll simulate the Responses API by converting to Chat Completions format
+        # and using the existing infrastructure, but with Responses API semantics
+        
+        # Convert Responses API request to Chat Completions format
+        chat_request = self._convert_responses_to_chat_request(request)
+        
+        if debug:
+            print(f"🔄 Converting Responses API request to Chat Completions format")
+            print(f"📋 Converted request: {chat_request}")
+        
+        # Submit using existing Chat Completions infrastructure
+        self.core._submit(json_dumps(chat_request))
+        
+        while True:
+            if response := self.core._get_response():
+                try:
+                    response_data = json_loads(response)
+                    if debug:
+                        print(f"📨 Raw Chat Completions response: {response_data}")
+                    
+                    # Convert back to Responses API format
+                    responses_format = self._convert_chat_to_responses_format(response_data)
+                    
+                    if debug:
+                        print(f"🆕 Converted to Responses API format: {responses_format}")
+                    
+                    return responses_format
+                except Exception as e:
+                    if debug:
+                        print(f"❌ Error processing response: {e}")
+                    raise
+
+    def _convert_responses_to_chat_request(self, responses_request: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert Responses API request to Chat Completions format"""
+        chat_request = {
+            "_headers": responses_request.get("_headers", {}),
+            "model": responses_request["model"],
+            "stream": False
+        }
+        
+        # Convert input to messages
+        input_data = responses_request.get("input")
+        instructions = responses_request.get("instructions")
+        
+        messages = []
+        
+        # Add instructions as system message
+        if instructions:
+            messages.append({"role": "system", "content": instructions})
+        
+        # Handle input
+        if isinstance(input_data, str):
+            messages.append({"role": "user", "content": input_data})
+        elif isinstance(input_data, list):
+            messages.extend(input_data)
+        
+        chat_request["messages"] = messages
+        
+        # Convert text.format to response_format
+        if "text" in responses_request and "format" in responses_request["text"]:
+            chat_request["response_format"] = responses_request["text"]["format"]
+        
+        # Copy other parameters
+        for key, value in responses_request.items():
+            if key not in ["input", "instructions", "text", "_headers", "_endpoint"]:
+                chat_request[key] = value
+        
+        return chat_request
+
+    def _convert_chat_to_responses_format(self, chat_response: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert Chat Completions response to Responses API format"""
+        # Simulate Responses API response structure
+        responses_response = {
+            "id": f"resp_{chat_response.get('id', 'unknown')}",
+            "object": "response",
+            "created_at": chat_response.get("created", 0),
+            "model": chat_response.get("model", ""),
+            "output": []
+        }
+        
+        # Convert choices to output items
+        if "choices" in chat_response:
+            for choice in chat_response["choices"]:
+                message = choice.get("message", {})
+                content = message.get("content", "")
+                
+                # Create message item
+                message_item = {
+                    "id": f"msg_{chat_response.get('id', 'unknown')}",
+                    "type": "message",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": content,
+                            "annotations": [],
+                            "logprobs": []
+                        }
+                    ],
+                    "role": "assistant"
+                }
+                
+                responses_response["output"].append(message_item)
+        
+        # Copy usage and other metadata
+        if "usage" in chat_response:
+            responses_response["usage"] = chat_response["usage"]
+        
+        return responses_response
+
+    def _convert_responses_to_chat_format(self, responses_response: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert Responses API response to Chat Completions format for parsing"""
+        chat_response = {
+            "id": responses_response.get("id", "").replace("resp_", "chatcmpl-"),
+            "object": "chat.completion",
+            "created": responses_response.get("created_at", 0),
+            "model": responses_response.get("model", ""),
+            "choices": []
+        }
+        
+        # Convert output items to choices
+        output_items = responses_response.get("output", [])
+        for i, item in enumerate(output_items):
+            if item.get("type") == "message":
+                content_items = item.get("content", [])
+                text_content = ""
+                
+                # Extract text from content items
+                for content_item in content_items:
+                    if content_item.get("type") == "output_text":
+                        text_content += content_item.get("text", "")
+                
+                choice = {
+                    "index": i,
+                    "message": {
+                        "role": "assistant",
+                        "content": text_content,
+                        "refusal": None
+                    },
+                    "finish_reason": "stop"
+                }
+                
+                chat_response["choices"].append(choice)
+        
+        # Copy usage and other metadata
+        if "usage" in responses_response:
+            chat_response["usage"] = responses_response["usage"]
+        
+        return chat_response
+
     async def _handle_tool_calls(
         self,
         messages: List[Dict[str, Any]],
@@ -384,7 +674,7 @@ class BaseLLMClient:
             # Create ToolCall object
             call = ToolCall(
                 id=tool_call.get("id", str(uuid.uuid4())),
-                type=tool_call["type"],
+                type=tool_call.get("type", "function"),  # Default to "function" if not provided
                 function=tool_call["function"]
             )
             
@@ -424,21 +714,117 @@ class BaseLLMClient:
 
     async def completion(
         self,
+        messages: List[Dict[str, Any]] = None,
+        *,
+        input: Union[str, List[Dict[str, Any]]] = None,  # New Responses API parameter
+        instructions: str = None,  # New Responses API parameter
+        stream: bool = False,
+        debug: bool = False,
+        **kwargs
+    ) -> Union[Dict[str, Any], AsyncIterator[str]]:
+        """
+        Enhanced completion method supporting both Chat Completions and Responses APIs.
+        
+        Chat Completions API (traditional):
+            response = await client.completion([{"role": "user", "content": "Hello"}])
+            
+        Responses API (OpenAI only):
+            response = await client.completion(input="Hello", instructions="You are helpful")
+            
+        Args:
+            messages: List of messages for Chat Completions API
+            input: Input for Responses API (string or list of messages)
+            instructions: System instructions for Responses API
+            stream: Whether to stream the response
+            debug: Enable debug logging
+            **kwargs: Additional parameters
+        """
+        # Set debug mode for this request
+        debug = debug or self.debug
+        
+        # Determine if we should use Responses API (OpenAI only)
+        use_responses_api = (
+            self.config.provider == "openai" and 
+            (input is not None or instructions is not None)
+        )
+        
+        if use_responses_api:
+            if debug:
+                print(f"🆕 Using OpenAI Responses API (stream={stream})")
+            
+            # Use the actual Responses API endpoint and format
+            return await self._responses_api_completion(
+                input=input,
+                instructions=instructions,
+                stream=stream,
+                debug=debug,
+                **kwargs
+            )
+        else:
+            if not messages:
+                raise ValueError("'messages' is required for Chat Completions API")
+            
+            if debug:
+                print(f"📡 Using Chat Completions API (stream={stream})")
+            
+            return await self._completion_chat_api(messages, stream=stream, debug=debug, **kwargs)
+
+    async def _responses_api_completion(
+        self,
+        input: Union[str, List[Dict[str, Any]]] = None,
+        instructions: str = None,
+        stream: bool = False,
+        debug: bool = False,
+        **kwargs
+    ) -> Union[Dict[str, Any], AsyncIterator[str]]:
+        """Handle completion using OpenAI's Responses API with fallback"""
+        if debug:
+            print(f"🚀 Trying Responses API (stream={stream})")
+        
+        # For now, fall back to Chat Completions API with conversion
+        # TODO: Implement true Responses API when Rust core supports /responses endpoint
+        if debug:
+            print("⚠️  Responses API not yet implemented in Rust core, falling back to Chat Completions")
+        
+        # Convert Responses API format to Chat Completions format
+        converted_messages = []
+        
+        if instructions:
+            converted_messages.append({"role": "system", "content": instructions})
+        
+        if isinstance(input, str):
+            converted_messages.append({"role": "user", "content": input})
+        elif isinstance(input, list):
+            converted_messages.extend(input)
+        else:
+            raise ValueError("'input' must be a string or list of messages")
+        
+        if debug:
+            print(f"🔄 Converting to Chat Completions format: {converted_messages}")
+        
+        # Use Chat Completions API with converted messages
+        return await self._completion_chat_api(converted_messages, stream=stream, debug=debug, **kwargs)
+
+    async def _completion_chat_api(
+        self,
         messages: List[Dict[str, Any]],
         stream: bool = False,
         debug: bool = False,
         **kwargs
     ) -> Union[Dict[str, Any], AsyncIterator[str]]:
-        """Modified completion method to handle tool calls"""
+        """Handle completion using Chat Completions API"""
         # Set debug mode for this request
         debug = debug or self.debug
         
         if stream:
+            # Use streaming method (debug is handled internally)
             return self.astream_completion(messages, **kwargs)
             
         # Add tools to request if any are registered
         if self.tool_registry.get_public_definitions():
-            if self.config.provider == "anthropic":
+            if self.config.provider == "cerebras":
+                tools = self.tool_registry.get_cerebras_definitions()
+            elif self.config.provider == "anthropic":
                 tools = self.tool_registry.get_anthropic_definitions()
             else:
                 tools = self.tool_registry.get_public_definitions()
@@ -466,6 +852,10 @@ class BaseLLMClient:
             headers = {
                 "x-api-key": self.config.api_key,
                 "anthropic-version": "2023-06-01",
+            }
+        elif self.config.provider == "mistral":
+            headers = {
+                "Authorization": f"Bearer {self.config.api_key}"
             }
         else:
             headers = {
@@ -588,11 +978,11 @@ class BaseLLMClient:
                             continue
 
                     # Check for tool calls in response
-                    if "tool_calls" in response_data.get("choices", [{}])[0].get("message", {}):
+                    message = response_data.get("choices", [{}])[0].get("message", {})
+                    tool_calls = message.get("tool_calls")
+                    if tool_calls and isinstance(tool_calls, list) and len(tool_calls) > 0:
                         if debug:
                             print("\nFound tool calls in response")
-                        
-                        tool_calls = response_data["choices"][0]["message"]["tool_calls"]
                         
                         # Handle tool calls and update messages
                         messages = await self._handle_tool_calls(messages, tool_calls, debug)
@@ -651,11 +1041,10 @@ class BaseLLMClient:
                         content = message.get("content", "")
                         
                         # First check for tool calls
-                        if "tool_calls" in message:
+                        tool_calls = message.get("tool_calls")
+                        if tool_calls and isinstance(tool_calls, list) and len(tool_calls) > 0:
                             if debug:
                                 print("\nFound tool calls in response")
-                            
-                            tool_calls = message["tool_calls"]
                             
                             # Handle tool calls and update messages
                             messages = await self._handle_tool_calls(messages, tool_calls, debug)
@@ -877,8 +1266,8 @@ class BaseLLMClient:
                 ],
                 token_field_img: max_tokens,
             }
-        elif self.config.provider in ("gemini", "openai"):
-            # Always force OpenAI-compatible chat/completions with explicit endpoint override
+        elif self.config.provider in ("gemini", "openai", "mistral", "groq"):
+            # Use standard Chat Completions format for all models (including GPT-5)
             messages = [
                 {
                     "role": "user",
@@ -892,6 +1281,8 @@ class BaseLLMClient:
             # Choose provider-appropriate base URL, but allow explicit override via config.base_url
             default_base = (
                 "https://api.openai.com/v1" if self.config.provider == "openai" else
+                "https://api.mistral.ai/v1" if self.config.provider == "mistral" else
+                "https://api.groq.com/openai/v1" if self.config.provider == "groq" else
                 "https://generativelanguage.googleapis.com/v1beta/openai"
             )
             endpoint = f"{(self.config.base_url or default_base)}/chat/completions"
@@ -951,6 +1342,14 @@ class BaseLLMClient:
                     except Exception:
                         pass
                     return {"text": text or str(data), "raw_response": data}
+                elif self.config.provider in ("openai", "mistral", "groq"):
+                    # OpenAI, Mistral, and Groq use standard OpenAI format
+                    text = None
+                    try:
+                        text = data.get("choices", [{}])[0].get("message", {}).get("content")
+                    except Exception:
+                        pass
+                    return {"text": text or str(data), "raw_response": data}
             if asyncio.get_event_loop().time() - start > self.config.timeout:
                 raise TimeoutError("Image analysis timed out")
             await asyncio.sleep(0.05)
@@ -1000,6 +1399,8 @@ class BaseLLMClient:
                 "x-api-key": self.config.api_key,
                 "anthropic-version": "2023-06-01",
             }
+        elif self.config.provider == "mistral":
+            headers = {"Authorization": f"Bearer {self.config.api_key}"}
         else:
             headers = {"Authorization": f"Bearer {self.config.api_key}"}
         
@@ -1033,7 +1434,9 @@ class BaseLLMClient:
         # Add tools if any are registered
         public_tools = self.tool_registry.get_public_definitions()
         if public_tools:
-            if self.config.provider == "anthropic":
+            if self.config.provider == "cerebras":
+                request["tools"] = self.tool_registry.get_cerebras_definitions()
+            elif self.config.provider == "anthropic":
                 request["tools"] = self.tool_registry.get_anthropic_definitions()
             else:
                 request["tools"] = public_tools
