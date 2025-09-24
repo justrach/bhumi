@@ -149,21 +149,45 @@ class ToolRegistry:
         """
         return self.get_public_definitions()
 
-    def get_anthropic_definitions(self) -> List[Dict[str, Any]]:
+    def get_cerebras_definitions(self) -> List[Dict[str, Any]]:
         """
-        Anthropic-compatible tool definitions:
-        [{ type: "custom", name, description, input_schema }]
+        Cerebras-compatible tool definitions:
+        [{ type: "function", function: { name, strict: true, description, parameters } }]
         """
         out: List[Dict[str, Any]] = []
         for t in self._definitions.values():
-            params = self._relax_schema(t.function["parameters"])  # Relax to avoid provider-side rejections
+            # For Cerebras, don't relax the schema - keep it strict
+            params = t.function["parameters"]  # Use original strict schema
             out.append(
                 {
-                    "type": "custom",
-                    "name": t.function["name"],
-                    "description": t.function["description"],
-                    # Anthropic expects input_schema JSON Schema object
-                    "input_schema": params,
+                    "type": t.type,
+                    "function": {
+                        "name": t.function["name"],
+                        "description": t.function["description"],
+                        "strict": True,  # Cerebras requires this
+                        "parameters": params,
+                    },
+                }
+            )
+        return out
+
+    def get_anthropic_definitions(self) -> List[Dict[str, Any]]:
+        """
+        Anthropic-compatible tool definitions:
+        [{ type: "function", function: { name, description, parameters } }]
+        """
+        out: List[Dict[str, Any]] = []
+        for t in self._definitions.values():
+            # For Anthropic, use relaxed schema
+            params = self._relax_schema(t.function["parameters"])
+            out.append(
+                {
+                    "type": t.type,
+                    "function": {
+                        "name": t.function["name"],
+                        "description": t.function["description"],
+                        "parameters": params,
+                    },
                 }
             )
         return out

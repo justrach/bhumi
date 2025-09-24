@@ -40,9 +40,92 @@ jobs:
         run: echo "✅ Build successful on ${{ matrix.os }} with Python ${{ matrix.python-version }}"
 
       - name: 🧪 Test Installation
+        shell: bash
         run: |
-          pip install dist/*.whl
-          python -c "import bhumi; print('✅ Import successful')"
+          # List what's in dist folder for debugging
+          echo "Contents of dist folder:"
+          ls -la dist/
+          
+          # Find compatible wheel for current platform
+          python -c "
+          import os, sys, platform
+          
+          # Get current platform info
+          python_version = f'cp{sys.version_info.major}{sys.version_info.minor}'
+          
+          if sys.platform.startswith('linux'):
+              platform_tags = ['linux_x86_64', 'manylinux']
+          elif sys.platform.startswith('darwin'):
+              arch = platform.machine()
+              if arch == 'arm64':
+                  platform_tags = ['macosx_11_0_arm64', 'macosx']
+              else:
+                  platform_tags = ['macosx_10_9_x86_64', 'macosx']
+          elif sys.platform.startswith('win'):
+              platform_tags = ['win_amd64', 'win32']
+          else:
+              platform_tags = []
+          
+          print(f'Looking for wheels compatible with: {python_version}, platform: {sys.platform}, tags: {platform_tags}')
+          
+          # Find compatible wheel
+          wheels = [f for f in os.listdir('dist') if f.endswith('.whl')]
+          compatible_wheel = None
+          
+          def is_python_compatible(wheel_name, target_version):
+              '''Check if wheel is compatible with target Python version'''
+              if target_version in wheel_name:
+                  return True
+              # Check for abi3 wheels (stable ABI, compatible with Python 3.8+)
+              if 'abi3' in wheel_name:
+                  # Extract the minimum Python version from abi3 wheel
+                  parts = wheel_name.split('-')
+                  for part in parts:
+                      if part.startswith('cp') and part.endswith('abi3'):
+                          min_version = part.replace('abi3', '')
+                          if min_version <= target_version:
+                              return True
+                      elif 'cp38' in part and 'abi3' in wheel_name:
+                          # cp38-abi3 is compatible with Python 3.8+
+                          target_major_minor = int(target_version[2:])  # cp311 -> 11
+                          if target_major_minor >= 8:  # Python 3.8+ (cp38 = 8, cp311 = 11)
+                              return True
+              return False
+          
+          for wheel in wheels:
+              print(f'Checking wheel: {wheel}')
+              if is_python_compatible(wheel, python_version):
+                  for tag in platform_tags:
+                      if tag in wheel:
+                          compatible_wheel = wheel
+                          print(f'Found compatible wheel: {wheel}')
+                          break
+                  if compatible_wheel:
+                      break
+          
+          if not compatible_wheel:
+              print('No platform-specific wheel found, trying any Python-compatible wheel...')
+              # Fallback: try any wheel with compatible Python version
+              for wheel in wheels:
+                  if is_python_compatible(wheel, python_version):
+                      compatible_wheel = wheel
+                      print(f'Using fallback wheel: {wheel}')
+                      break
+          
+          if compatible_wheel:
+              exit_code = os.system(f'pip install dist/{compatible_wheel}')
+              if exit_code != 0:
+                  print(f'Failed to install {compatible_wheel}')
+                  exit(1)
+          else:
+              print('No compatible wheel found!')
+              print('Available wheels:')
+              for wheel in wheels:
+                  print(f'  {wheel}')
+              exit(1)
+          "
+          
+          python -c "import bhumi; print('Import successful')"
 
   check-version:
     name: 🏷️ Check Version Consistency
