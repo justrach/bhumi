@@ -43,12 +43,6 @@ jobs:
       - name: 🦀 Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: 📦 Install system dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
-
       - name: 🏗️ Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -56,6 +50,10 @@ jobs:
           args: --release --out wheelhouse --strip
           sccache: 'true'
           manylinux: '2014'
+          before-script-linux: |
+            # Install OpenSSL development libraries in the manylinux container
+            yum update -y
+            yum install -y openssl-devel pkgconfig
 
       - name: 📤 Upload wheels as artifacts
         uses: actions/upload-artifact@v4
