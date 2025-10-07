@@ -1,5 +1,5 @@
 import os
-import orjson
+import json
 from typing import Dict, List, Optional, Tuple
 import statistics
 from satya import Model, Field
@@ -78,25 +78,25 @@ class MapElitesArchive(Model):
     )
 
 class MapElitesBuffer:
-    """Optimized buffer strategy using trained MAP-Elites archive with orjson + Satya v0.3.7 nested model validation"""
+    """Optimized buffer strategy using trained MAP-Elites archive with Satya v0.3.7 nested model validation"""
     
     def __init__(self, archive_path: str = "src/archive_latest.json"):
         self.current_size = 8192  # Default starting size
         self.chunk_history = []
         self.response_length = 0
         
-        # Fast loading with orjson + Satya v0.3.7 nested model validation
+        # Fast loading with Satya v0.3.7 nested model validation
         self._load_archive_fast(archive_path)
         
         # Get best overall config as fallback
         self.best_config = max(self.archive.values(), key=lambda x: x[1])[0]
         
     def _load_archive_fast(self, archive_path: str):
-        """Fast archive loading with orjson and Satya v0.3.7 nested model validation"""
+        """Fast archive loading with Satya v0.3.7 nested model validation"""
         try:
-            # Use orjson for ultra-fast JSON parsing (2-3x faster than json)
-            with open(archive_path, 'rb') as f:
-                raw_data = orjson.loads(f.read())
+            # Use stdlib json for parsing
+            with open(archive_path, 'r') as f:
+                raw_data = json.load(f)
 
             # Use Satya v0.3.7's enhanced nested model validation
             # This now supports Dict[str, ArchiveEntry] structures!
@@ -139,8 +139,6 @@ class MapElitesBuffer:
     
     def _load_archive_fallback(self, archive_path: str):
         """Fallback loading method using standard json"""
-        import json
-        
         with open(archive_path) as f:
             data = json.load(f)
             

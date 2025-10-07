@@ -38,7 +38,8 @@ mod openai;
 use openai::OpenAIResponse;
 
 // Response type to handle completions
-#[pyclass]
+// Safe for free-threaded Python: all fields are Send + Sync
+#[pyclass(frozen)]
 struct LLMResponse {
     #[pyo3(get)]
     text: String,
@@ -46,6 +47,11 @@ struct LLMResponse {
     raw_response: String,
 }
 
+// Explicitly implement Sync for free-threaded Python support
+unsafe impl Sync for LLMResponse {}
+
+// Safe for free-threaded Python: all fields are Send + Sync
+// Arc<Mutex<T>> and Arc<RwLock<T>> are Sync when T is Send
 #[pyclass]
 struct BhumiCore {
     sender: Arc<tokio::sync::Mutex<mpsc::Sender<String>>>,
@@ -66,6 +72,10 @@ struct BhumiCore {
     max_tokens: Option<i32>,  // Add max_tokens field
     buffer_size: usize,
 }
+
+// Explicitly implement Sync for free-threaded Python support
+// All fields are already Sync (Arc<Mutex/RwLock>, primitives, String)
+unsafe impl Sync for BhumiCore {}
 
 #[pymethods]
 impl BhumiCore {
@@ -647,7 +657,7 @@ impl BhumiCore {
         })
     }
 
-    fn completion(&self, model: &str, messages: &PyAny, api_key: &str) -> PyResult<LLMResponse> {
+    fn completion(&self, model: &str, messages: &Bound<'_, PyAny>, api_key: &str) -> PyResult<LLMResponse> {
         let (provider, _model_name) = match model.split_once('/') {
             Some((p, m)) => (p, m),
             None => (model, model),
@@ -663,16 +673,19 @@ impl BhumiCore {
             }
         });
 
-        let messages_json: Vec<serde_json::Value> = messages.extract::<Vec<&PyDict>>()?
+        let messages_list: Vec<Bound<'_, PyDict>> = messages.extract()?;
+        let messages_json: Vec<serde_json::Value> = messages_list
             .iter()
             .map(|dict| {
                 let role = dict.get_item("role")
-                    .unwrap()
+                    .ok()
+                    .flatten()
                     .and_then(|v| v.extract::<String>().ok())
                     .unwrap_or_else(|| "user".to_string());
                 
                 let content = dict.get_item("content")
-                    .unwrap()
+                    .ok()
+                    .flatten()
                     .and_then(|v| v.extract::<String>().ok())
                     .unwrap_or_default();
                 
@@ -893,9 +906,11 @@ async fn process_response(
     }
 }
 
-#[pymodule]
-fn bhumi(_py: Python, m: &PyModule) -> PyResult<()> {
+// Enable free-threaded Python support for Python 3.13+
+// This allows true parallel execution without the GIL!
+#[pymodule(gil_used = false)]
+fn bhumi(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<LLMResponse>()?;
     m.add_class::<BhumiCore>()?;
     Ok(())
-} 
+}
