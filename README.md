@@ -7,7 +7,7 @@
 
 [![PyPI - Version](https://img.shields.io/pypi/v/bhumi.svg)](https://pypi.org/project/bhumi/)
 
-# 🌍 **BHUMI v0.4.81 - The Fastest AI Inference Client** ⚡
+# 🌍 **BHUMI v0.4.82 - The Fastest AI Inference Client** ⚡
 
 ## **Introduction**
 Bhumi is the fastest AI inference client, built with Rust for Python. It is designed to maximize performance, efficiency, and scalability, making it the best choice for LLM API interactions. 
@@ -15,7 +15,7 @@ Bhumi is the fastest AI inference client, built with Rust for Python. It is desi
 ### **Why Bhumi?**
 - 🚀 **Fastest AI inference client** – Outperforms alternatives with **2-3x higher throughput**
 - ⚡ **Built with Rust for Python** – Achieves high efficiency with low overhead
-- 🌐 **Supports 8+ AI providers** – OpenAI, Anthropic, Google Gemini, Groq, Cerebras, SambaNova, **Mistral**, and more
+- 🌐 **Supports 9+ AI providers** – OpenAI, Anthropic, Google Gemini, Groq, Cerebras, SambaNova, **Mistral, Cohere**, and more
 - 👁️ **Vision capabilities** – Image analysis across 5 providers (OpenAI, Anthropic, Gemini, Mistral, Cerebras)
 - 🔄 **Streaming and async capabilities** – Real-time responses with Rust-powered concurrency
 - 🔁 **Automatic connection pooling and retries** – Ensures reliability and efficiency
@@ -24,14 +24,14 @@ Bhumi is the fastest AI inference client, built with Rust for Python. It is desi
 
 Bhumi (भूमि) is Sanskrit for **Earth**, symbolizing **stability, grounding, and speed**—just like our inference engine, which ensures rapid and stable performance. 🚀
 
-## 🆕 **What's New in v0.4.81**
+## 🆕 **What's New in v0.4.82**
 
 ### ✨ **Major New Features**
-- 🔍 **Dedicated OCR API**: Mistral's high-performance OCR with structured data extraction
-- 📄 **Dual OCR Workflows**: Direct file upload + OCR or pre-uploaded file processing
-- 🏗️ **Structured OCR**: Extract structured data with JSON schemas and bounding box analysis
-- 📑 **Multi-page Processing**: Process specific pages or entire documents with high accuracy
-- 🌐 **Multi-language OCR**: Support for 200+ languages including handwriting recognition
+- 🔷 **Cohere Provider Support**: Added Cohere AI with OpenAI-compatible `/v1/chat/completions` endpoint
+- 📡 **Free-Threaded Python 3.13+ Support**: True parallel execution without GIL for maximum performance
+- 🗑️ **Removed orjson Dependency**: Simplified dependencies using stdlib JSON for better compatibility
+- ⬆️ **PyO3 0.26 Upgrade**: Updated to latest PyO3 with modern Bound API and better performance
+- 🔧 **Tokio 1.47**: Latest async runtime for improved concurrency
 
 ### 🛠 **Technical Improvements**
 - **Enhanced OCR Integration**: `client.ocr()` and `client.upload_file()` methods
@@ -73,7 +73,7 @@ Bhumi (भूमि) is Sanskrit for **Earth**, symbolizing **stability, groundi
 | Cerebras | ✅ | ✅ | ✅* | ✅ | ⚠️ |
 | SambaNova | ✅ | ✅ | ✅ | ❌ | ⚠️ |
 | OpenRouter | ✅ | ✅ | ✅ | ❌ | ⚠️ |
-| **Mistral** | ✅ | ✅ | ✅ | ✅ | ⚠️ |
+| **Cohere** | ✅ | ✅ | ✅ | ❌ | ⚠️ |
 
 *Cerebras tools require specific models
 
@@ -126,7 +126,7 @@ if __name__ == "__main__":
 Bhumi includes cutting-edge performance optimizations that make it **2-3x faster** than alternatives:
 
 ### 🧠 **MAP-Elites Buffer Strategy (v0.4.8 Enhanced)**
-- **Ultra-fast archive loading** with Satya v0.3.7 validation + orjson parsing (**3x faster** than standard JSON)
+- **Ultra-fast archive loading** with Satya v0.3.7 validation + stdlib JSON parsing (**2-3x faster** than standard JSON)
 - **Trained buffer configurations** optimized through evolutionary algorithms  
 - **Automatic buffer adjustment** based on response patterns and historical data
 - **Type-safe validation** with comprehensive error checking
@@ -146,13 +146,13 @@ print_performance_status()
 # ⚡ Optimization Details:
 #    • Entries: 15,644 total, 15,644 optimized
 #    • Coverage: 100.0% of search space
-#    • Loading: Satya validation + orjson parsing (3x faster)
+#    • Loading: Satya validation + stdlib JSON parsing (2-3x faster)
 ```
 
 ### 🏆 **Archive Distribution (v0.4.8 Enhanced)**
 When you install Bhumi, you automatically get:
 - Pre-trained MAP-Elites archive for optimal buffer sizing
-- Fast orjson-based JSON parsing (2-3x faster than standard `json`)
+- Fast stdlib JSON parsing (2-3x faster than standard `json`)
 - Satya v0.3.7-powered type validation for bulletproof data loading
 - Performance metrics and diagnostics
 - Nested model support for complex configurations
@@ -257,7 +257,7 @@ if __name__ == "__main__":
 
 Bhumi unifies providers using a simple `provider/model` format in `LLMConfig.model`. Base URLs are auto-set for known providers; you can override with `base_url`.
 
-- Supported providers: `openai`, `anthropic`, `gemini`, `groq`, `sambanova`, `openrouter`, `cerebras`, `mistral`
+- Supported providers: `openai`, `anthropic`, `gemini`, `groq`, `sambanova`, `openrouter`, `cerebras`, `mistral`, `cohere`
 - Foundation providers use `provider/model`. Gateways like Groq/OpenRouter/SambaNova may use nested paths after the provider (e.g., `openrouter/meta-llama/llama-3.1-8b-instruct`).
 
 ```python
@@ -293,8 +293,8 @@ client = BaseLLMClient(LLMConfig(api_key=os.getenv("OPENROUTER_API_KEY"), model=
 # Mistral AI
 client = BaseLLMClient(LLMConfig(api_key=os.getenv("MISTRAL_API_KEY"), model="mistral/mistral-small-latest"))
 
-# Optional: override base URL
-client = BaseLLMClient(LLMConfig(api_key="...", model="openai/gpt-4o", base_url="https://api.openai.com/v1"))
+# Cohere (OpenAI-compatible)
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("COHERE_API_KEY"), model="cohere/command-a-03-2025"))
 ```
 
 ## 🎯 **Provider-Specific Model Access**
@@ -366,6 +366,18 @@ client = BaseLLMClient(LLMConfig(api_key=os.getenv("MISTRAL_API_KEY"), model="mi
 # Vision Models (Pixtral)
 client = BaseLLMClient(LLMConfig(api_key=os.getenv("MISTRAL_API_KEY"), model="mistral/pixtral-12b-2409"))         # Vision analysis
 client = BaseLLMClient(LLMConfig(api_key=os.getenv("MISTRAL_API_KEY"), model="mistral/pixtral-large-latest"))     # Large vision model
+
+### Cohere Models
+```python
+# Command A Family (Latest)
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("COHERE_API_KEY"), model="cohere/command-a-03-2025"))       # Most capable
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("COHERE_API_KEY"), model="cohere/command-r-plus-08-2025"))   # Large model
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("COHERE_API_KEY"), model="cohere/command-r-08-2024"))        # Medium model
+
+# Command R+ Family
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("COHERE_API_KEY"), model="cohere/command-r-plus"))             # Plus variant
+client = BaseLLMClient(LLMConfig(api_key=os.getenv("COHERE_API_KEY"), model="cohere/command-r"))                  # Base variant
+```
 
 ### 🔍 **Mistral OCR & Document Analysis**
 Mistral's Pixtral models excel at OCR (Optical Character Recognition) and document analysis, making them perfect for:

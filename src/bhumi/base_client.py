@@ -68,6 +68,8 @@ class LLMConfig:
                 self.base_url = "https://api.mistral.ai/v1"
             elif self.provider == "openrouter":
                 self.base_url = "https://openrouter.ai/api/v1"
+            elif self.provider == "cohere":
+                self.base_url = "https://api.cohere.ai/compatibility/v1"
             else:
                 self.base_url = "https://api.openai.com/v1"  # Default to OpenAI
 
@@ -88,7 +90,7 @@ def parse_streaming_chunk(chunk: str, provider: str) -> str:
                     data = json_loads(data_str)
                     
                     # Extract content based on provider format
-                    if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini', 'cerebras']:
+                    if provider in ['openai', 'groq', 'openrouter', 'sambanova', 'gemini', 'cerebras', 'cohere', 'mistral']:
                         # OpenAI-compatible format
                         if 'choices' in data and len(data['choices']) > 0:
                             delta = data['choices'][0].get('delta', {})

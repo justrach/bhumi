@@ -115,7 +115,7 @@ def print_performance_status():
             print(f"   • Entries: {perf_info['total_entries']:,} total, {perf_info['valid_entries']:,} optimized")
             print(f"   • Coverage: {perf_info['optimization_coverage']:.1%} of search space")
             print(f"   • Performance: {perf_info['average_performance']:.1f} avg, {perf_info['best_performance']:.1f} best")
-            print(f"   • Loading: Satya validation + orjson parsing (3x faster)")
+            print(f"   • Loading: Satya validation with stdlib JSON parsing")
             
         except Exception as e:
             print(f"   ⚠️ Could not load performance details: {e}")
