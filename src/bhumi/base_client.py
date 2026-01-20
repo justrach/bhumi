@@ -695,27 +695,30 @@ class BaseLLMClient:
             print(f"🔄 Converting Responses API request to Chat Completions format")
             print(f"📋 Converted request: {chat_request}")
         
-        # Submit using existing Chat Completions infrastructure
-        self.core._submit(json_dumps(chat_request))
-        
-        while True:
-            if response := self.core._get_response():
-                try:
-                    response_data = json_loads(response)
-                    if debug:
-                        print(f"📨 Raw Chat Completions response: {response_data}")
-                    
-                    # Convert back to Responses API format
-                    responses_format = self._convert_chat_to_responses_format(response_data)
-                    
-                    if debug:
-                        print(f"🆕 Converted to Responses API format: {responses_format}")
-                    
-                    return responses_format
-                except Exception as e:
-                    if debug:
-                        print(f"❌ Error processing response: {e}")
-                    raise
+        # Submit using existing Chat Completions infrastructure with correlation ID
+        request_id = self.core._submit_with_id(json_dumps(chat_request))
+        timeout_ms = int(self.config.timeout * 1000) if self.config.timeout else 120000
+
+        response = self.core._get_response_for_id(request_id, timeout_ms)
+        if not response:
+            raise TimeoutError(f"Request timed out after {timeout_ms}ms")
+
+        try:
+            response_data = json_loads(response)
+            if debug:
+                print(f"📨 Raw Chat Completions response: {response_data}")
+
+            # Convert back to Responses API format
+            responses_format = self._convert_chat_to_responses_format(response_data)
+
+            if debug:
+                print(f"🆕 Converted to Responses API format: {responses_format}")
+
+            return responses_format
+        except Exception as e:
+            if debug:
+                print(f"❌ Error processing response: {e}")
+            raise
 
     def _convert_responses_to_chat_request(self, responses_request: Dict[str, Any]) -> Dict[str, Any]:
         """Convert Responses API request to Chat Completions format"""
@@ -1088,13 +1091,19 @@ class BaseLLMClient:
 
         if self.debug_debug:
             print(f"\nSending request: {json_dumps(request)}")
-        
-        # Submit request
-        self.core._submit(json_dumps(request))
-        
+
+        # Submit request with correlation ID for thread-safe concurrent requests
+        request_id = self.core._submit_with_id(json_dumps(request))
+        timeout_ms = int(self.config.timeout * 1000) if self.config.timeout else 120000
+
         while True:
-            if response := self.core._get_response():
-                try:
+            # Wait for response (oneshot receiver - full timeout on each iteration)
+            response = self.core._get_response_for_id(request_id, timeout_ms)
+
+            if not response:
+                raise TimeoutError(f"Request timed out after {timeout_ms}ms")
+
+            try:
                     if debug:
                         print(f"\nRaw response: {response}")
                     
@@ -1160,7 +1169,7 @@ class BaseLLMClient:
                                     print(f"\n[anthropic][non-stream AFC] resubmitting with tool_results: {json_dumps(tool_results)}")
                                 except Exception:
                                     pass
-                            self.core._submit(json_dumps(next_request))
+                            request_id = self.core._submit_with_id(json_dumps(next_request))
                             continue
 
                     # Check for tool calls in response
@@ -1176,12 +1185,12 @@ class BaseLLMClient:
                         # Continue conversation with tool results
                         if self.debug_debug:
                             print(f"\nContinuing conversation with updated messages: {json_dumps(messages)}")
-                        
+
                         # Make a new request with the updated messages
                         request["messages"] = messages
-                        self.core._submit(json_dumps(request))
+                        request_id = self.core._submit_with_id(json_dumps(request))
                         continue
-                    
+
                     # For Gemini responses
                     if self.config.provider == "gemini":
                         if "candidates" in response_data:
@@ -1211,9 +1220,9 @@ class BaseLLMClient:
                                 
                                 # Make a new request with the updated messages (OpenAI-compatible continuation)
                                 request["messages"] = messages
-                                self.core._submit(json_dumps(request))
+                                request_id = self.core._submit_with_id(json_dumps(request))
                                 continue
-                            
+
                             # Handle regular response
                             text = candidate.get("content", {}).get("parts", [{}])[0].get("text", "")
                             return {
@@ -1241,9 +1250,9 @@ class BaseLLMClient:
                             
                             # Make a new request with the updated messages
                             request["messages"] = messages
-                            self.core._submit(json_dumps(request))
+                            request_id = self.core._submit_with_id(json_dumps(request))
                             continue
-                        
+
                         # Extract function call from content if present
                         function_match = re.search(r'<function-call>(.*?)</function-call>', content, re.DOTALL)
                         if function_match:
@@ -1267,7 +1276,7 @@ class BaseLLMClient:
                                 
                                 # Make a new request with the updated messages
                                 request["messages"] = messages
-                                self.core._submit(json_dumps(request))
+                                request_id = self.core._submit_with_id(json_dumps(request))
                                 continue
                             except JSONDecodeError as e:
                                 if debug:
@@ -1329,14 +1338,13 @@ class BaseLLMClient:
                         "raw_response": response_data
                     }
                     
-                except Exception as e:
-                    if debug:
-                        print(f"\nError parsing response: {e}")
-                    return {
-                        "text": str(response),
-                        "raw_response": {"text": str(response)}
-                    }
-            await asyncio.sleep(0.1)
+            except Exception as e:
+                if debug:
+                    print(f"\nError parsing response: {e}")
+                return {
+                    "text": str(response),
+                    "raw_response": {"text": str(response)}
+                }
 
     async def generate_image(
         self,
@@ -1384,11 +1392,11 @@ class BaseLLMClient:
             except Exception:
                 pass
 
-        self.core._submit(json_dumps(request))
+        request_id = self.core._submit_with_id(json_dumps(request))
 
         start = asyncio.get_event_loop().time()
         while True:
-            if response := self.core._get_response():
+            if response := self.core._get_response_for_id(request_id, 50):  # 50ms timeout for image gen
                 try:
                     return json_loads(response)
                 except Exception:
@@ -1500,11 +1508,11 @@ class BaseLLMClient:
             except Exception:
                 pass
 
-        self.core._submit(json_dumps(request))
+        request_id = self.core._submit_with_id(json_dumps(request))
 
         start = asyncio.get_event_loop().time()
         while True:
-            if response := self.core._get_response():
+            if response := self.core._get_response_for_id(request_id, 50):  # 50ms timeout for image analysis
                 try:
                     data = json_loads(response)
                 except Exception:
