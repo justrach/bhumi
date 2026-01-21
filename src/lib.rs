@@ -21,21 +21,37 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use serde_json::Value;
 use futures_util::StreamExt;
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 use std::sync::Mutex;
 use tokio::time::sleep;
 use std::time::Duration;
 use std::future::Future;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use bytes;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod anthropic;
 mod openai;
 
 use openai::OpenAIResponse;
+
+// Request wrapper that includes oneshot channel for direct response delivery
+// This ensures request-response correlation in concurrent scenarios
+struct RequestWithCallback {
+    request_id: u64,
+    request_json: String,
+    response_tx: oneshot::Sender<String>,
+}
+
+// Streaming request with dedicated chunk channel
+struct StreamRequestWithCallback {
+    request_id: u64,
+    request_json: String,
+    chunk_tx: mpsc::Sender<String>,
+}
 
 // Response type to handle completions
 // Safe for free-threaded Python: all fields are Send + Sync
@@ -54,7 +70,17 @@ unsafe impl Sync for LLMResponse {}
 // Arc<Mutex<T>> and Arc<RwLock<T>> are Sync when T is Send
 #[pyclass]
 struct BhumiCore {
-    sender: Arc<tokio::sync::Mutex<mpsc::Sender<String>>>,
+    // Non-streaming: request channel with oneshot callback for direct response delivery
+    request_sender: Arc<tokio::sync::Mutex<mpsc::Sender<RequestWithCallback>>>,
+    // Streaming: separate channel with per-request chunk sender
+    stream_request_sender: Arc<tokio::sync::Mutex<mpsc::Sender<StreamRequestWithCallback>>>,
+    // Atomic counter for unique request IDs
+    request_id_counter: Arc<AtomicU64>,
+    // Pending response receivers for non-streaming (request_id -> oneshot::Receiver)
+    pending_responses: Arc<Mutex<HashMap<u64, oneshot::Receiver<String>>>>,
+    // Pending stream receivers (request_id -> mpsc::Receiver for chunks)
+    pending_streams: Arc<Mutex<HashMap<u64, mpsc::Receiver<String>>>>,
+    // Legacy: shared response receiver for backwards compatibility (will be removed)
     response_receiver: Arc<tokio::sync::Mutex<mpsc::Receiver<String>>>,
     runtime: Arc<tokio::runtime::Runtime>,
     #[pyo3(get)]
@@ -67,9 +93,10 @@ struct BhumiCore {
     model: String,
     use_grounding: bool,
     provider: String,  // "anthropic", "gemini", "openai", "groq", or "sambanova"
+    // Legacy: shared stream chunks (kept for backwards compatibility during migration)
     stream_chunks: Arc<Mutex<VecDeque<String>>>,
-    base_url: Option<String>,  // Change to Option<String>
-    max_tokens: Option<i32>,  // Add max_tokens field
+    base_url: Option<String>,
+    max_tokens: Option<i32>,
     buffer_size: usize,
 }
 
@@ -102,12 +129,22 @@ impl BhumiCore {
         base_url: Option<&str>,
         buffer_size: usize,
     ) -> PyResult<Self> {
-        let (request_tx, request_rx) = mpsc::channel::<String>(100_000);
+        // NEW: Channels with oneshot callback for request-response correlation
+        let (request_tx, request_rx) = mpsc::channel::<RequestWithCallback>(100_000);
+        let (stream_request_tx, stream_request_rx) = mpsc::channel::<StreamRequestWithCallback>(100_000);
+
+        // Legacy channels for backwards compatibility (will be removed in future version)
+        let (_legacy_request_tx, _legacy_request_rx) = mpsc::channel::<String>(100_000);
         let (response_tx, response_rx) = mpsc::channel::<String>(100_000);
-        
+
         let request_rx = Arc::new(tokio::sync::Mutex::new(request_rx));
-        let sender = Arc::new(tokio::sync::Mutex::new(request_tx));
+        let stream_request_rx = Arc::new(tokio::sync::Mutex::new(stream_request_rx));
+        let request_sender = Arc::new(tokio::sync::Mutex::new(request_tx));
+        let stream_request_sender = Arc::new(tokio::sync::Mutex::new(stream_request_tx));
         let response_receiver = Arc::new(tokio::sync::Mutex::new(response_rx));
+        let request_id_counter = Arc::new(AtomicU64::new(1));
+        let pending_responses: Arc<Mutex<HashMap<u64, oneshot::Receiver<String>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let pending_streams: Arc<Mutex<HashMap<u64, mpsc::Receiver<String>>>> = Arc::new(Mutex::new(HashMap::new()));
         let active_requests = Arc::new(tokio::sync::RwLock::new(0));
         let provider = provider.to_string();
         
@@ -158,10 +195,9 @@ impl BhumiCore {
             }
         };
 
-        // Spawn workers
+        // Spawn non-streaming workers with oneshot callback pattern
         for worker_id in 0..max_concurrent {
             let request_rx = request_rx.clone();
-            let response_tx = response_tx.clone();
             let active_requests = active_requests.clone();
             let client = client.clone();
             let debug = debug;
@@ -169,16 +205,15 @@ impl BhumiCore {
             let provider = provider.clone();
             let model = model.to_string();
             let use_grounding = use_grounding;
-            let stream_chunks = stream_chunks.clone();
+            let stream_chunks = stream_chunks.clone();  // Legacy streaming support
             let base_url = base_url.clone();
-            
+
             runtime.spawn(async move {
                 if debug {
-                    println!("Starting worker {}", worker_id);
+                    println!("Starting non-streaming worker {}", worker_id);
                 }
-                let mut buffer: Vec<u8> = Vec::with_capacity(32768);
                 loop {
-                    let request = {
+                    let request_with_callback = {
                         let mut rx = request_rx.lock().await;
                         rx.recv().await
                     };
@@ -187,12 +222,16 @@ impl BhumiCore {
                         println!("Worker {}: Received request", worker_id);
                     }
 
-                    if let Some(request_str) = request {
+                    if let Some(req) = request_with_callback {
+                        let request_id = req.request_id;
+                        let request_str = req.request_json;
+                        let response_tx = req.response_tx;
+
                         {
                             let mut active = active_requests.write().await;
                             *active += 1;
                             if debug {
-                                println!("Worker {}: Active requests: {}", worker_id, *active);
+                                println!("Worker {}: Active requests: {} (request_id={})", worker_id, *active, request_id);
                             }
                         }
 
@@ -345,7 +384,8 @@ impl BhumiCore {
                                                     chunks.push_back("{\"error\":\"timeout during send\"}".to_string());
                                                     chunks.push_back("[DONE]".to_string());
                                                 } else {
-                                                    let _ = response_tx.try_send("{\"error\":\"timeout during send\"}".to_string());
+                                                    // Send error via oneshot (consumes the sender)
+                                                    let _ = response_tx.send("{\"error\":\"timeout during send\"}".to_string());
                                                 }
                                                 // Decrement active and continue to next request
                                                 {
@@ -595,16 +635,17 @@ impl BhumiCore {
                                             let mut buffer = Vec::with_capacity(32768);
                                             let stream = resp.bytes_stream();
                                             tokio::pin!(stream);
-                                            
+
                                             while let Some(chunk_result) = stream.next().await {
                                                 if let Ok(bytes) = chunk_result {
                                                     buffer.extend_from_slice(&bytes);
                                                 }
                                             }
-                                            
+
                                             if let Ok(text) = String::from_utf8(buffer) {
                                                 if serde_json::from_str::<Value>(&text).is_ok() {
-                                                    response_tx.try_send(text).ok();
+                                                    // Send response directly via oneshot channel (guaranteed correlation!)
+                                                    let _ = response_tx.send(text);
                                                 }
                                             }
                                         }
@@ -638,7 +679,11 @@ impl BhumiCore {
         }
 
         Ok(BhumiCore {
-            sender,
+            request_sender,
+            stream_request_sender,
+            request_id_counter,
+            pending_responses,
+            pending_streams,
             response_receiver,
             runtime: runtime_clone,
             max_concurrent,
@@ -651,8 +696,8 @@ impl BhumiCore {
             use_grounding,
             provider,
             stream_chunks,
-            base_url: Some(base_url),  // Store as Option
-            max_tokens: None,  // Initialize as None
+            base_url: Some(base_url),
+            max_tokens: None,
             buffer_size,
         })
     }
@@ -722,18 +767,74 @@ impl BhumiCore {
         Err(PyErr::new::<pyo3::exceptions::PyTimeoutError, _>("Request timed out"))
     }
 
-    #[pyo3(name = "_submit")]
-    fn submit(&self, request: String) -> PyResult<()> {
-        let sender = self.sender.clone();
+    /// NEW: Submit request and get a unique request ID for correlation
+    /// Returns the request_id that can be used with _get_response_for_id
+    #[pyo3(name = "_submit_with_id")]
+    fn submit_with_id(&self, request: String) -> PyResult<u64> {
+        let request_id = self.request_id_counter.fetch_add(1, Ordering::SeqCst);
+        let (response_tx, response_rx) = oneshot::channel();
+
+        // Store the receiver for later retrieval
+        {
+            let mut pending = self.pending_responses.lock().unwrap();
+            pending.insert(request_id, response_rx);
+        }
+
+        let sender = self.request_sender.clone();
         self.runtime.block_on(async {
             let sender = sender.lock().await;
-            sender.send(request)
-                .await
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-            Ok(())
-        })
+            sender.send(RequestWithCallback {
+                request_id,
+                request_json: request,
+                response_tx,
+            })
+            .await
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok::<(), PyErr>(())
+        })?;
+
+        Ok(request_id)
     }
 
+    /// NEW: Get response for a specific request ID (guaranteed correlation!)
+    /// NOTE: This removes the receiver from pending, so only call once you're ready to wait.
+    /// Use a sufficiently long timeout (e.g., 30000ms for LLM calls).
+    #[pyo3(name = "_get_response_for_id")]
+    fn get_response_for_id(&self, request_id: u64, timeout_ms: u64) -> PyResult<Option<String>> {
+        // Take the receiver out of pending map (one-shot, so can only wait once)
+        let receiver = {
+            let mut pending = self.pending_responses.lock().unwrap();
+            pending.remove(&request_id)
+        };
+
+        match receiver {
+            Some(rx) => {
+                self.runtime.block_on(async {
+                    match tokio::time::timeout(
+                        tokio::time::Duration::from_millis(timeout_ms),
+                        rx
+                    ).await {
+                        Ok(Ok(response)) => Ok(Some(response)),
+                        Ok(Err(_)) => Ok(None), // Sender dropped
+                        Err(_) => Ok(None), // Timeout
+                    }
+                })
+            }
+            None => Ok(None), // No pending request with this ID (already consumed or never existed)
+        }
+    }
+
+    /// LEGACY: Submit request without correlation (DEPRECATED - use _submit_with_id)
+    /// WARNING: This method is not safe for concurrent requests!
+    #[pyo3(name = "_submit")]
+    fn submit(&self, request: String) -> PyResult<()> {
+        // Use the new correlated submit but ignore the ID for backwards compatibility
+        let _ = self.submit_with_id(request)?;
+        Ok(())
+    }
+
+    /// LEGACY: Get any available response (DEPRECATED - use _get_response_for_id)
+    /// WARNING: This method may return responses from other concurrent requests!
     #[pyo3(name = "_get_response")]
     fn get_response(&self) -> PyResult<Option<String>> {
         let receiver = self.response_receiver.clone();
@@ -761,11 +862,34 @@ impl BhumiCore {
         })
     }
 
+    /// LEGACY: Get stream chunk from shared queue (DEPRECATED)
+    /// WARNING: This method may return chunks from other concurrent streaming requests!
     fn _get_stream_chunk(&self) -> Option<String> {
         let mut chunks = self.stream_chunks.lock().unwrap();
         chunks.pop_front()
     }
-    
+
+    /// NEW: Get stream chunk for a specific request ID (guaranteed correlation!)
+    #[pyo3(name = "_get_stream_chunk_for_id")]
+    fn get_stream_chunk_for_id(&self, request_id: u64) -> Option<String> {
+        let mut pending = self.pending_streams.lock().unwrap();
+        if let Some(rx) = pending.get_mut(&request_id) {
+            match rx.try_recv() {
+                Ok(chunk) => Some(chunk),
+                Err(_) => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// NEW: Clean up stream receiver after streaming is done
+    #[pyo3(name = "_cleanup_stream")]
+    fn cleanup_stream(&self, request_id: u64) {
+        let mut pending = self.pending_streams.lock().unwrap();
+        pending.remove(&request_id);
+    }
+
     fn _process_stream_response(&self, response: String) {
         // Split response into SSE chunks
         for line in response.lines() {
