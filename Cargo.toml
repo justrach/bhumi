@@ -1,6 +1,6 @@
 [package]
 name = "bhumi"
-version = "0.1.0"
+version = "0.4.82"
 authors = ["Rach Pradhan <rach@rachpradhan.com>"]
 edition = "2021"
 description = "High performance LLM client with batching capabilities and multi-provider support"
